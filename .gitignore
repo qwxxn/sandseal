@@ -1,6 +1,5 @@
 node_modules/
 .next/
 dist/
-docker-compose.yaml
 .env.local
 .pnpm-store/
