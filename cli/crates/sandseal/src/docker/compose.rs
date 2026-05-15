@@ -178,9 +178,14 @@ fn format_compose_yaml(
         ctx.project_name
     ));
 
-    // Build args
+    // Build (context = tmp_dir so COPY finds agent-installs/, entrypoint.sh etc.)
+    yaml.push_str(&format!(
+        "    build:\n      context: \"{}\"\n      dockerfile: \"{}/agents/Dockerfile\"\n",
+        ctx.tmp_dir.display(),
+        ctx.script_dir.display(),
+    ));
     if !build_args.is_empty() {
-        yaml.push_str("    build:\n      args:\n");
+        yaml.push_str("      args:\n");
         for (key, val) in build_args {
             yaml.push_str(&format!("        {key}: \"{val}\"\n"));
         }

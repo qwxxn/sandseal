@@ -193,8 +193,29 @@ pub fn start(args: StartArgs) -> Result<()> {
 
     register_signal_handler(Arc::clone(&guard));
 
+    // Compose env vars (needed by base docker-compose.yml template)
+    let cachebust = if args.rebuild {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string()
+    } else {
+        "1".to_string()
+    };
+
+    let compose_env = runtime::ComposeEnv {
+        project_name: project_name.clone(),
+        project_dir: project_dir.to_string_lossy().to_string(),
+        sandbox_uid: uid.to_string(),
+        sandbox_gid: gid.to_string(),
+        sandbox_username: username.clone(),
+        sandbox_home: sandbox_home.clone(),
+        cachebust,
+    };
+
     // Compose up
-    runtime::compose_up(&compose_cmd, args.rebuild)?;
+    runtime::compose_up(&compose_cmd, args.rebuild, &compose_env)?;
 
     // Wait for container and attach
     let container_name = runtime::get_container_name(&instance_name)?;

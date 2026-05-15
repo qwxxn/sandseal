@@ -5,6 +5,17 @@ use std::thread;
 use std::time::Duration;
 use tracing::{debug, error, info};
 
+/// Environment variables needed by the base docker-compose.yml template.
+pub struct ComposeEnv {
+    pub project_name: String,
+    pub project_dir: String,
+    pub sandbox_uid: String,
+    pub sandbox_gid: String,
+    pub sandbox_username: String,
+    pub sandbox_home: String,
+    pub cachebust: String,
+}
+
 /// Build the base docker compose command with project name and compose files.
 pub fn compose_cmd(
     instance_name: &str,
@@ -26,7 +37,7 @@ pub fn compose_cmd(
 }
 
 /// Run `docker compose up -d [--build] agent`
-pub fn compose_up(cmd: &[String], rebuild: bool) -> Result<()> {
+pub fn compose_up(cmd: &[String], rebuild: bool, env: &ComposeEnv) -> Result<()> {
     let mut args: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
     args.push("up");
     args.push("-d");
@@ -37,13 +48,21 @@ pub fn compose_up(cmd: &[String], rebuild: bool) -> Result<()> {
 
     debug!("running: {}", args.join(" "));
 
-    let status = Command::new(&args[0])
+    let mut command = Command::new(&args[0]);
+    command
         .args(&args[1..])
+        .env("PROJECT_NAME", &env.project_name)
+        .env("PROJECT_DIR", &env.project_dir)
+        .env("SANDBOX_UID", &env.sandbox_uid)
+        .env("SANDBOX_GID", &env.sandbox_gid)
+        .env("SANDBOX_USERNAME", &env.sandbox_username)
+        .env("SANDBOX_HOME", &env.sandbox_home)
+        .env("CACHEBUST", &env.cachebust)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .context("failed to run docker compose up")?;
+        .stderr(Stdio::inherit());
+
+    let status = command.status().context("failed to run docker compose up")?;
 
     if !status.success() {
         bail!("docker compose up failed with exit code: {}", status.code().unwrap_or(-1));

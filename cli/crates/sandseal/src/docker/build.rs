@@ -24,10 +24,12 @@ pub fn assemble_build_context(
         debug!("copied agent installs to {}", agent_installs_dst.display());
     }
 
-    // Copy setup hook script
+    // Setup scripts dir (must always exist for COPY in Dockerfile)
+    let setup_dir = tmp_dir.join("setup-scripts");
+    std::fs::create_dir_all(&setup_dir)?;
+    std::fs::write(setup_dir.join(".gitkeep"), "")?;
+
     if let Some(setup_path) = setup_script {
-        let setup_dir = tmp_dir.join("setup-scripts");
-        std::fs::create_dir_all(&setup_dir)?;
         let dst = setup_dir.join("setup.sh");
         std::fs::copy(setup_path, &dst)
             .with_context(|| format!("failed to copy setup script: {}", setup_path.display()))?;
