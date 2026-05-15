@@ -1,0 +1,45 @@
+{
+  "_comment": "Cross-platform test vectors for Sandseal E2E encryption. Generated deterministically — do NOT regenerate, verify against these fixed values.",
+
+  "hkdf": {
+    "_ref": "RFC 5869 Test Case 1",
+    "ikm_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "salt_hex": "000102030405060708090a0b0c",
+    "info_hex": "f0f1f2f3f4f5f6f7f8f9",
+    "length": 42,
+    "expected_hex": "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+  },
+
+  "chacha20poly1305": {
+    "_comment": "Roundtrip only — ciphertext varies by implementation framing. Verify encrypt→decrypt produces original plaintext.",
+    "key_hex": "0000000000000000000000000000000000000000000000000000000000000001",
+    "nonce_hex": "000000000000000000000002",
+    "plaintext": "Hello, Sandseal!"
+  },
+
+  "argon2id": {
+    "password": "password",
+    "password_hex": "70617373776f7264",
+    "salt_hex": "736f6d6573616c74736f6d6573616c74",
+    "t": 3,
+    "m": 65536,
+    "p": 1,
+    "dkLen": 32,
+    "expected_hex": "7664ad4ba1a3c999fcdd0991ffc2270f78302d2383233db5e7befc85d1bb1819"
+  },
+
+  "x25519": {
+    "_comment": "Private keys: alice=0xa8+31*0xab, bob=0xb8+31*0xba. Shared secret is canonical across x25519-dalek and @noble/curves.",
+    "alice_private_hex": "a8ababababababababababababababababababababababababababababababab",
+    "bob_private_hex": "b8bababababababababababababababababababababababababababababababa",
+    "expected_shared_hex": "ae4308c8b3190d4fad661be6add92ecc55c107176fe1beffe3c4139c758f6b03"
+  },
+
+  "session_keys": {
+    "_comment": "HKDF session key derivation from fixed shared secret, no salt, info='sandseal-session-v1-gen0', output 64 bytes split into send+recv.",
+    "shared_hex": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "info": "sandseal-session-v1-gen0",
+    "expected_send_hex": "47420f839ecccf6d88a149c420928f827b3d45af73aa9745e244d7b0563adf28",
+    "expected_recv_hex": "3cdba652f200305bef11153a9317ce7d72ec4ebfcd42ddb5653702ba890206f9"
+  }
+}
