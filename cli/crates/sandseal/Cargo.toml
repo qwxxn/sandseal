@@ -1,0 +1,53 @@
+[package]
+name = "sandseal"
+description = "Isolated Docker sandboxes for AI coding agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "sandseal"
+path = "src/main.rs"
+
+[dependencies]
+sandseal-protocol = { path = "../sandseal-protocol" }
+
+# Core
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# JSON Schema validation
+jsonschema = "0.29"
+
+# File system
+glob = "0.3"
+dirs = "6"
+tempfile = "3"
+shellexpand = "3"
+
+# Process / signals
+nix = { version = "0.29", features = ["signal", "process", "user"] }
+ctrlc = "3"
+
+# Hashing
+sha1 = "0.10"
+
+# Random
+rand = "0.9"
+
+# UUID
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"

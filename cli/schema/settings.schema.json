@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sandseal Settings",
+  "description": "Configuration for the Sandseal AI agent sandbox",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference for IDE autocompletion"
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "include": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "memoryLimit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "memorySwapLimit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseImage": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "setup": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "script": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "prestart": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        },
+        "setupHost": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        },
+        "cleanupHost": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Directory mounted into the sandbox, giving the agent visibility into other projects",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Host directory path to mount"
+        },
+        "readwrite": {
+          "type": "boolean",
+          "description": "Mount read-write instead of read-only (default: false)"
+        }
+      },
+      "required": ["dir"]
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      }
+    }
+  }
+}
