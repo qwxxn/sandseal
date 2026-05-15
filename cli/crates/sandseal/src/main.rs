@@ -5,6 +5,7 @@ mod docker;
 mod logging;
 mod network;
 mod path;
+mod remote;
 mod sandbox;
 
 use anyhow::Result;

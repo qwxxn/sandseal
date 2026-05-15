@@ -59,6 +59,11 @@ base64 = { workspace = true }
 zeroize = { workspace = true }
 rand_core_06 = { workspace = true }
 
+# Networking
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+url = { workspace = true }
+
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
