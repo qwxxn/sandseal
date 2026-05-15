@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod crypto;
 mod docker;
 mod logging;
 mod network;
