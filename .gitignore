@@ -4,6 +4,7 @@ target/
 
 # Node
 node_modules/
+.pnpm-store/
 .next/
 out/
 
@@ -20,3 +21,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.code-workspace
+
+# Internal docs (not public)
+internal-docs/

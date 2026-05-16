@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-/// Deep merge two JSON values following Hole's merge semantics:
+/// Deep merge two JSON values:
 /// - Objects: recursively merged, `b` wins for scalar key conflicts
 /// - Arrays: concatenated (a first, then b), deduplicated preserving insertion order
 /// - Scalars: `b` wins
