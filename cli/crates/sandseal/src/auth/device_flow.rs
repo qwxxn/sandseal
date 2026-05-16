@@ -4,9 +4,6 @@ use tracing::info;
 
 use crate::auth::token::{AuthToken, save_token};
 
-const DEVICE_AUTH_URL: &str = "https://sandseal.io/api/auth/device";
-const TOKEN_URL: &str = "https://sandseal.io/api/auth/device/token";
-
 #[derive(Deserialize)]
 struct DeviceCodeResponse {
     device_code: String,

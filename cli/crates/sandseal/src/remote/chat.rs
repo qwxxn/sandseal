@@ -4,9 +4,9 @@ use anyhow::{Result, Context};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{info, error, debug};
+use tracing::{info, debug};
 
-use crate::crypto::session::{SessionKeys, MessageType};
+use crate::crypto::session::SessionKeys;
 use crate::remote::relay::RelayClient;
 
 /// Bridge Claude Code's `--output-format stream-json` output to the relay.
