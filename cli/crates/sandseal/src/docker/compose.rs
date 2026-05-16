@@ -15,7 +15,6 @@ pub struct ComposeContext<'a> {
     pub sandbox_gid: u32,
     pub sandbox_username: &'a str,
     pub sandbox_home: &'a str,
-    pub ttyd_port: u16,
     pub debug: bool,
     pub rebuild: bool,
     pub agent_args: &'a [String],
@@ -87,7 +86,6 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
 
     // Environment
     let mut environment = HashMap::new();
-    environment.insert("TTYD_PORT".to_string(), ctx.ttyd_port.to_string());
 
     if let Some(env_vars) = &ctx.settings.environment {
         for (key, val) in env_vars {
@@ -127,7 +125,6 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
     let mut labels = HashMap::new();
     labels.insert("sandseal.project_name", ctx.project_name.to_string());
     labels.insert("sandseal.project_dir", ctx.project_dir.to_string_lossy().to_string());
-    labels.insert("sandseal.ttyd_port", ctx.ttyd_port.to_string());
     labels.insert("sandseal.instance_name", ctx.instance_name.to_string());
 
     // Command

@@ -8,7 +8,6 @@ use crate::cli::{DestroyArgs, StartArgs};
 use crate::config::merge::deep_merge;
 use crate::config::validate::validate_settings;
 use crate::docker::{build, compose, runtime};
-use crate::network::port;
 use crate::sandbox::cleanup::{register_signal_handler, CleanupGuard};
 use crate::sandbox::hooks;
 
@@ -88,13 +87,9 @@ pub fn start(args: StartArgs) -> Result<()> {
     // Load and merge settings
     let global_settings_path = home.join(".sandseal/settings.json");
     let project_settings_path = project_dir.join(".sandseal/settings.json");
-    // Backward compat: also check .hole/ paths
-    let global_hole_path = home.join(".hole/settings.json");
-    let project_hole_path = project_dir.join(".hole/settings.json");
-
     let mut merged = serde_json::json!({});
 
-    for path in [&global_settings_path, &global_hole_path, &project_settings_path, &project_hole_path] {
+    for path in [&global_settings_path, &project_settings_path] {
         if path.exists() {
             let validated = validate_settings(path)?;
             merged = deep_merge(&merged, &validated);
@@ -111,11 +106,6 @@ pub fn start(args: StartArgs) -> Result<()> {
             hooks::run_setup_host_hooks(setup_host, &project_dir)?;
         }
     }
-
-    // Allocate ttyd port
-    let used_ports = port::get_used_ttyd_ports().unwrap_or_default();
-    let ttyd_port = port::allocate_ttyd_port(&used_ports)?;
-    info!("allocated ttyd port: {ttyd_port}");
 
     // Resolve hooks for build context
     let setup_script = settings.hooks.as_ref()
@@ -161,8 +151,7 @@ pub fn start(args: StartArgs) -> Result<()> {
         sandbox_gid: gid,
         sandbox_username: &username,
         sandbox_home: &sandbox_home,
-        ttyd_port,
-        debug: std::env::var("SANDSEAL_DEBUG").is_ok(), // separate from clap debug
+        debug: std::env::var("SANDSEAL_DEBUG").is_ok(),
         rebuild: args.rebuild,
         agent_args: &args.agent_args,
         settings: &settings,
@@ -327,7 +316,7 @@ pub fn status() -> Result<()> {
         .args([
             "ps",
             "--filter", "label=sandseal.project_name",
-            "--format", "table {{.Names}}\t{{.Status}}\t{{.Label \"sandseal.project_dir\"}}\t{{.Label \"sandseal.ttyd_port\"}}",
+            "--format", "table {{.Names}}\t{{.Status}}\t{{.Label \"sandseal.project_dir\"}}",
         ])
         .output()
         .context("failed to list containers")?;
