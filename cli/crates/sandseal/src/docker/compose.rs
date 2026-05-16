@@ -60,8 +60,14 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         }
     }
 
-    // Docker socket
-    volumes.push("/var/run/docker.sock:/var/run/docker.sock".to_string());
+    // Docker socket (opt-in via settings)
+    let docker_passthrough = ctx.settings.docker.as_ref()
+        .and_then(|d| d.passthrough)
+        .unwrap_or(false);
+    if docker_passthrough {
+        tracing::warn!("docker.passthrough is enabled — sandbox has full Docker access");
+        volumes.push("/var/run/docker.sock:/var/run/docker.sock".to_string());
+    }
 
     // Sandseal config (read-only)
     let home = dirs::home_dir().unwrap_or_default();
@@ -73,16 +79,6 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
             ctx.sandbox_home
         ));
     }
-    // Hole config backward compat
-    let hole_config = home.join(".hole");
-    if hole_config.is_dir() {
-        volumes.push(format!(
-            "{}:{}/.hole:ro",
-            hole_config.display(),
-            ctx.sandbox_home
-        ));
-    }
-
     // Prestart scripts
     let prestart_dir = ctx.tmp_dir.join("prestart-scripts");
     if prestart_dir.is_dir() {
@@ -141,6 +137,15 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         build_agent_command(ctx.script_dir, ctx.agent_args)?
     };
 
+    // Network mode
+    let host_network = ctx.settings.network.as_ref()
+        .and_then(|n| n.mode.as_deref())
+        .map(|m| m == "host")
+        .unwrap_or(false);
+    if host_network {
+        tracing::warn!("network.mode is 'host' — sandbox shares host network namespace");
+    }
+
     // Build YAML
     let yaml = format_compose_yaml(
         ctx,
@@ -149,6 +154,7 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         &build_args,
         &labels,
         &command,
+        host_network,
     );
 
     Ok(yaml)
@@ -169,6 +175,7 @@ fn format_compose_yaml(
     build_args: &HashMap<&str, String>,
     labels: &HashMap<&str, String>,
     command: &[String],
+    host_network: bool,
 ) -> String {
     let mut yaml = String::from("services:\n  agent:\n");
 
@@ -189,6 +196,11 @@ fn format_compose_yaml(
         for (key, val) in build_args {
             yaml.push_str(&format!("        {key}: \"{val}\"\n"));
         }
+    }
+
+    // Network mode
+    if host_network {
+        yaml.push_str("    network_mode: host\n");
     }
 
     // Volumes

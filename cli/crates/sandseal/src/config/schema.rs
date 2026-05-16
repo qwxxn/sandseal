@@ -23,6 +23,12 @@ pub struct Settings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<HashMap<String, String>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<NetworkSettings>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker: Option<DockerSettings>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -80,4 +86,16 @@ pub struct WorkspaceSettings {
 
     #[serde(default)]
     pub readwrite: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NetworkSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DockerSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passthrough: Option<bool>,
 }

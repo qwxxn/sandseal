@@ -17,4 +17,3 @@ services:
       # mount project at host absolute path
       - ${PROJECT_DIR:-.}:${PROJECT_DIR:-.}
     working_dir: ${PROJECT_DIR:-.}
-    network_mode: host

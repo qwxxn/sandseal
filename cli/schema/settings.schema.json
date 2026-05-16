@@ -134,6 +134,29 @@
       "propertyNames": {
         "minLength": 1
       }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["bridge", "host"],
+          "default": "bridge",
+          "description": "Network mode for the sandbox container. 'bridge' (default) isolates the container network. 'host' shares the host network namespace — use only when necessary."
+        }
+      }
+    },
+    "docker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "passthrough": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mount Docker socket into the sandbox, giving the agent full Docker access. Disabled by default for security."
+        }
+      }
     }
   }
 }
