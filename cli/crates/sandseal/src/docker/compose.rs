@@ -68,13 +68,13 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         volumes.push("/var/run/docker.sock:/var/run/docker.sock".to_string());
     }
 
-    // Sandseal config (read-only)
+    // Sandseal settings only (not auth.json or identity.key)
     let home = dirs::home_dir().unwrap_or_default();
-    let sandseal_config = home.join(".sandseal");
-    if sandseal_config.is_dir() {
+    let settings_file = home.join(".sandseal/settings.json");
+    if settings_file.is_file() {
         volumes.push(format!(
-            "{}:{}/.sandseal:ro",
-            sandseal_config.display(),
+            "{}:{}/.sandseal/settings.json",
+            settings_file.display(),
             ctx.sandbox_home
         ));
     }
