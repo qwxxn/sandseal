@@ -20,6 +20,14 @@ pub enum Command {
     Destroy(DestroyArgs),
     /// Show running sandbox instances
     Status,
+    /// Log in to Sandseal via browser
+    Login(LoginArgs),
+    /// Log out and remove stored credentials
+    Logout,
+    /// Show current login status
+    Whoami,
+    /// Connect to a remote session via relay
+    Connect(ConnectArgs),
 }
 
 #[derive(Parser)]
@@ -46,4 +54,22 @@ pub struct DestroyArgs {
     /// Destroy all sandboxes
     #[arg(long)]
     pub all: bool,
+}
+
+#[derive(Parser)]
+pub struct LoginArgs {
+    /// API server URL (defaults to https://sandseal.io)
+    #[arg(long)]
+    pub api_url: Option<String>,
+}
+
+#[derive(Parser)]
+pub struct ConnectArgs {
+    /// Project directory (defaults to current directory)
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// API server URL (defaults to https://sandseal.io)
+    #[arg(long)]
+    pub api_url: Option<String>,
 }

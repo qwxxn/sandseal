@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::{Result, Context};
+use anyhow::{bail, Result, Context};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -67,4 +67,13 @@ pub fn clear_token() -> Result<()> {
         std::fs::remove_file(&path)?;
     }
     Ok(())
+}
+
+pub fn require_valid_token() -> Result<AuthToken> {
+    let token = load_token()?
+        .context("not logged in — run `sandseal login` first")?;
+    if token.is_expired() {
+        bail!("session expired — run `sandseal login` to re-authenticate");
+    }
+    Ok(token)
 }
