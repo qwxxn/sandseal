@@ -92,6 +92,9 @@ pub struct WorkspaceSettings {
 pub struct NetworkSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub services: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

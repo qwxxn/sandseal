@@ -143,6 +143,18 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         tracing::warn!("network.mode is 'host' — sandbox shares host network namespace");
     }
 
+    // Service endpoints → extra_hosts
+    let extra_hosts: Vec<(String, String)> = ctx.settings.network.as_ref()
+        .and_then(|n| n.services.as_ref())
+        .map(|services| {
+            services.iter().map(|(hostname, target)| {
+                // Strip port if present (extra_hosts only does hostname → IP)
+                let host = target.split(':').next().unwrap_or(target);
+                (hostname.clone(), host.to_string())
+            }).collect()
+        })
+        .unwrap_or_default();
+
     // Build YAML
     let yaml = format_compose_yaml(
         ctx,
@@ -152,6 +164,7 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         &labels,
         &command,
         host_network,
+        &extra_hosts,
     );
 
     Ok(yaml)
@@ -173,6 +186,7 @@ fn format_compose_yaml(
     labels: &HashMap<&str, String>,
     command: &[String],
     host_network: bool,
+    extra_hosts: &[(String, String)],
 ) -> String {
     let mut yaml = String::from("services:\n  agent:\n");
 
@@ -198,6 +212,14 @@ fn format_compose_yaml(
     // Network mode
     if host_network {
         yaml.push_str("    network_mode: host\n");
+    }
+
+    // Extra hosts (network.services)
+    if !extra_hosts.is_empty() {
+        yaml.push_str("    extra_hosts:\n");
+        for (hostname, target) in extra_hosts {
+            yaml.push_str(&format!("      - \"{hostname}:{target}\"\n"));
+        }
     }
 
     // Volumes

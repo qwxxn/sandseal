@@ -144,6 +144,17 @@
           "enum": ["bridge", "host"],
           "default": "bridge",
           "description": "Network mode for the sandbox container. 'bridge' (default) isolates the container network. 'host' shares the host network namespace — use only when necessary."
+        },
+        "services": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "description": "Service endpoints accessible from the sandbox. Maps hostname to target (e.g. \"db.dev\": \"host-gateway:5432\"). Generates extra_hosts entries in docker-compose."
         }
       }
     },
