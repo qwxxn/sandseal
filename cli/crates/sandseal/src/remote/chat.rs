@@ -1,25 +1,20 @@
-use std::sync::Arc;
-
 use anyhow::{Result, Context};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tracing::{info, debug};
 
-use crate::crypto::session::SessionKeys;
 use crate::remote::relay::RelayClient;
 
 /// Bridge Claude Code's `--output-format stream-json` output to the relay.
 ///
-/// Spawns Claude Code with the given prompt, reads JSON events from stdout,
-/// and forwards each line as an encrypted Data frame to the relay.
-/// User input from the browser is forwarded to stdin.
+/// Spawns Claude Code with the given prompt, connects to relay (with key
+/// exchange), then forwards encrypted frames bidirectionally.
 pub async fn bridge_chat(
     project_dir: &str,
     prompt: &str,
     relay_url: String,
     relay_token: String,
-    session_keys: Arc<Mutex<SessionKeys>>,
 ) -> Result<()> {
     let mut child = Command::new("claude")
         .args([
@@ -43,7 +38,7 @@ pub async fn bridge_chat(
     let (to_relay_tx, to_relay_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let (from_relay_tx, mut from_relay_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-    // Read claude stdout → send to relay as encrypted Data frames
+    // Read claude stdout → send to relay
     let tx = to_relay_tx.clone();
     let read_handle = tokio::spawn(async move {
         while let Ok(Some(line)) = reader.next_line().await {
@@ -51,15 +46,14 @@ pub async fn bridge_chat(
                 continue;
             }
             debug!("claude event: {}", &line[..line.len().min(80)]);
-            let data = line.into_bytes();
-            if tx.send(data).is_err() {
+            if tx.send(line.into_bytes()).is_err() {
                 break;
             }
         }
         info!("claude process output ended");
     });
 
-    // Forward relay input → claude stdin (user messages from browser)
+    // Forward relay input → claude stdin
     let stdin = child.stdin.take();
     let write_handle = tokio::spawn(async move {
         if let Some(mut stdin) = stdin {
@@ -75,9 +69,9 @@ pub async fn bridge_chat(
         }
     });
 
-    // Relay connection
+    // Connect to relay with key exchange, then bridge encrypted
     let relay = RelayClient::new(relay_url, relay_token);
-    let relay_result = relay.run(session_keys, to_relay_rx, from_relay_tx).await;
+    let relay_result = relay.connect_and_run(to_relay_rx, from_relay_tx).await;
 
     read_handle.abort();
     write_handle.abort();

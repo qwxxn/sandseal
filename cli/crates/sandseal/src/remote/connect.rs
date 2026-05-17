@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use tokio::sync::mpsc;
 use tracing::info;
 
 use crate::auth::token::require_valid_token;
 use crate::crypto::keys::ensure_identity;
+use crate::remote::relay::RelayClient;
 
 const DEFAULT_API_URL: &str = "https://sandseal.io";
 
@@ -46,24 +48,46 @@ pub async fn connect(project_dir: &str, api_url: Option<&str>) -> Result<()> {
     info!("session created: {}", resp.id);
     println!("  Session: {}", resp.id);
     println!("  Relay: {}", resp.relay_url);
+    println!("  Waiting for browser to connect...");
 
-    // Key exchange between CLI and browser is not yet implemented.
-    // The crypto primitives exist (X25519KeyPair, SessionKeys::from_key_exchange),
-    // but there is no transport mechanism for the browser to send its ephemeral
-    // public key to the CLI. This needs a design decision:
-    //   - API-brokered: CLI posts ephemeral key to API, browser retrieves + responds
-    //   - Relay-brokered: initial unencrypted handshake over WebSocket
-    //
-    // Once key exchange is implemented, the flow continues:
-    //   1. X25519KeyPair::generate() for ephemeral keypair
-    //   2. Exchange ephemeral public keys with browser
-    //   3. SessionKeys::from_key_exchange() to derive encryption keys
-    //   4. bridge_chat() or RelayClient::run() with session keys
+    // Connect to relay and perform key exchange with browser.
+    // The relay-brokered protocol:
+    //   1. Auth with relay token (first text message)
+    //   2. Send ephemeral X25519 pubkey (32 bytes binary)
+    //   3. Receive browser's ephemeral pubkey
+    //   4. Derive shared SessionKeys → encrypted communication
+    let relay = RelayClient::new(resp.relay_url, resp.relay_token);
 
-    println!();
-    println!("  Key exchange not yet implemented.");
-    println!("  Session created but cannot establish encrypted connection.");
-    println!("  See: cli/crates/sandseal/src/crypto/pairing.rs for available primitives.");
+    // For `sandseal connect`, stdin/stdout bridge to relay
+    let (local_tx, mut local_rx_out) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (local_tx_in, local_rx_in) = mpsc::unbounded_channel::<Vec<u8>>();
 
+    // Pipe relay output → stdout
+    let output_handle = tokio::spawn(async move {
+        while let Some(data) = local_rx_out.recv().await {
+            if let Ok(text) = String::from_utf8(data) {
+                print!("{text}");
+            }
+        }
+    });
+
+    // Pipe stdin → relay input
+    let input_handle = tokio::spawn(async move {
+        use tokio::io::AsyncBufReadExt;
+        let stdin = tokio::io::stdin();
+        let mut reader = tokio::io::BufReader::new(stdin).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            if local_tx_in.send(line.into_bytes()).is_err() {
+                break;
+            }
+        }
+    });
+
+    relay.connect_and_run(local_rx_in, local_tx).await?;
+
+    output_handle.abort();
+    input_handle.abort();
+
+    println!("\n  Session ended.");
     Ok(())
 }
