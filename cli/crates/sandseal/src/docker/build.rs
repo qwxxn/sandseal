@@ -16,6 +16,15 @@ pub fn assemble_build_context(
         .with_context(|| format!("failed to copy entrypoint: {}", src.display()))?;
     debug!("copied entrypoint to {}", dst.display());
 
+    // Copy apt-wrapper
+    let apt_wrapper_src = script_dir.join("agents/apt-wrapper.sh");
+    if apt_wrapper_src.is_file() {
+        let dst = tmp_dir.join("apt-wrapper.sh");
+        std::fs::copy(&apt_wrapper_src, &dst)
+            .with_context(|| format!("failed to copy apt-wrapper: {}", apt_wrapper_src.display()))?;
+        debug!("copied apt-wrapper to {}", dst.display());
+    }
+
     // Copy agent install scripts
     let agent_installs_src = script_dir.join("agents/claude");
     let agent_installs_dst = tmp_dir.join("agent-installs/claude");

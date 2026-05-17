@@ -41,20 +41,20 @@ fn generate_instance_id() -> String {
 
 /// Find the sandseal script/assets directory.
 fn find_script_dir() -> Result<PathBuf> {
-    // In development: relative to the binary or SANDSEAL_DIR env var
     if let Ok(dir) = std::env::var("SANDSEAL_DIR") {
         return Ok(PathBuf::from(dir));
     }
 
-    // Try relative to the binary location
     let exe = std::env::current_exe()?;
     let exe_dir = exe.parent().unwrap();
 
-    // Check for agents/ directory in various locations
+    let home_dir = dirs::home_dir().unwrap_or_default();
+
     for candidate in &[
-        exe_dir.join("../../.."),            // cargo run: target/debug -> project root
-        exe_dir.to_path_buf(),               // installed: same dir
-        exe_dir.join(".."),                   // installed: parent
+        home_dir.join(".sandseal"),           // installed: ~/.sandseal/agents/
+        exe_dir.join("../../.."),             // cargo run: target/debug -> project root
+        exe_dir.to_path_buf(),               // installed: same dir as binary
+        exe_dir.join(".."),                   // installed: parent of binary
         PathBuf::from("."),                   // current dir
     ] {
         let agents = candidate.join("agents");

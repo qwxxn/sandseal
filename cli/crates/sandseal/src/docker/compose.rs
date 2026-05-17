@@ -269,5 +269,10 @@ fn format_compose_yaml(
         yaml.push_str(&format!("    command: {cmd_json}\n"));
     }
 
+    // Top-level volumes declaration (required for named volumes)
+    yaml.push_str("\nvolumes:\n");
+    yaml.push_str("  sandseal-apt-cache:\n");
+    yaml.push_str("    external: false\n");
+
     yaml
 }
