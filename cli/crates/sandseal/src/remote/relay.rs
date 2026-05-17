@@ -94,6 +94,14 @@ impl RelayClient {
             while let Some(data) = local_rx.recv().await {
                 let frame = {
                     let mut keys = send_keys.lock().await;
+                    if keys.needs_rotation() {
+                        let rotation_frame = keys.seal(MessageType::KeyRotation, &[]);
+                        if let Ok(rf) = rotation_frame {
+                            let _ = ws_sink.send(Message::Binary(rf.into())).await;
+                        }
+                        keys.rotate();
+                        info!("key rotation performed (gen {})", keys.generation());
+                    }
                     keys.seal(MessageType::Data, &data)
                 };
                 match frame {
@@ -124,6 +132,11 @@ impl RelayClient {
                                     break;
                                 }
                             }
+                            MessageType::KeyRotation => {
+                                let mut keys = session_keys.lock().await;
+                                keys.rotate();
+                                info!("peer rotated keys (gen {})", keys.generation());
+                            }
                             MessageType::Close => {
                                 info!("received close from peer");
                                 break;
@@ -145,7 +158,8 @@ impl RelayClient {
         }
 
         send_handle.abort();
-        info!("relay connection closed");
+        let keys = session_keys.lock().await;
+        info!("relay connection closed (sent {} messages)", keys.send_count());
         Ok(())
     }
 }
