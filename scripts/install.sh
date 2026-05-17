@@ -3,8 +3,10 @@ set -euo pipefail
 
 REPO="sandseal/sandseal"
 INSTALL_DIR="${SANDSEAL_INSTALL_DIR:-$HOME/.local/bin}"
+DATA_DIR="${SANDSEAL_DIR:-$HOME/.sandseal}"
 
 info() { printf '\033[0;34m%s\033[0m\n' "$1"; }
+warn() { printf '\033[0;33m%s\033[0m\n' "$1"; }
 error() { printf '\033[0;31mError: %s\033[0m\n' "$1" >&2; exit 1; }
 
 detect_os() {
@@ -48,6 +50,13 @@ download() {
     fi
 }
 
+check_docker() {
+    if ! command -v docker &>/dev/null; then
+        warn "Docker not found. sandseal requires Docker to run sandboxes."
+        warn "Install Docker: https://docs.docker.com/get-docker/"
+    fi
+}
+
 main() {
     local os arch version target url tmpdir
 
@@ -72,16 +81,45 @@ main() {
 
     tar -xzf "${tmpdir}/sandseal.tar.gz" -C "${tmpdir}"
 
+    # Install binary
     mkdir -p "${INSTALL_DIR}"
     mv "${tmpdir}/sandseal" "${INSTALL_DIR}/sandseal"
     chmod +x "${INSTALL_DIR}/sandseal"
+    info "Binary installed to ${INSTALL_DIR}/sandseal"
 
-    info "Installed to ${INSTALL_DIR}/sandseal"
+    # Install agents (Dockerfile, entrypoint, compose template)
+    if [[ -d "${tmpdir}/agents" ]]; then
+        mkdir -p "${DATA_DIR}/agents"
+        cp -r "${tmpdir}/agents/." "${DATA_DIR}/agents/"
+        chmod +x "${DATA_DIR}/agents/entrypoint.sh" 2>/dev/null || true
+        chmod +x "${DATA_DIR}/agents/apt-wrapper.sh" 2>/dev/null || true
+        info "Agents installed to ${DATA_DIR}/agents/"
+    fi
 
+    # Install schema
+    if [[ -d "${tmpdir}/schema" ]]; then
+        mkdir -p "${DATA_DIR}/schema"
+        cp -r "${tmpdir}/schema/." "${DATA_DIR}/schema/"
+        info "Schema installed to ${DATA_DIR}/schema/"
+    fi
+
+    # Check prerequisites
+    check_docker
+
+    # PATH hint
     if ! echo "${PATH}" | tr ':' '\n' | grep -qx "${INSTALL_DIR}"; then
         info ""
         info "Add ${INSTALL_DIR} to your PATH:"
         info "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+        info ""
+        info "Or add to your shell config:"
+        local shell_rc=""
+        case "${SHELL:-/bin/bash}" in
+            */zsh)  shell_rc="~/.zshrc" ;;
+            */fish) shell_rc="~/.config/fish/config.fish" ;;
+            *)      shell_rc="~/.bashrc" ;;
+        esac
+        info "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ${shell_rc}"
     fi
 
     info ""
