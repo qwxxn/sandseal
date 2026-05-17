@@ -62,8 +62,8 @@ pub struct DestroyArgs {
 
 #[derive(Parser)]
 pub struct LoginArgs {
-    /// API server URL (defaults to https://sandseal.io)
-    #[arg(long)]
+    /// API server URL
+    #[arg(long, env = "SANDSEAL_API_URL")]
     pub api_url: Option<String>,
 }
 
@@ -73,8 +73,8 @@ pub struct ConnectArgs {
     #[arg(default_value = ".")]
     pub path: PathBuf,
 
-    /// API server URL (defaults to https://sandseal.io)
-    #[arg(long)]
+    /// API server URL
+    #[arg(long, env = "SANDSEAL_API_URL")]
     pub api_url: Option<String>,
 }
 
@@ -84,8 +84,8 @@ pub struct PairArgs {
     #[command(subcommand)]
     pub mode: PairMode,
 
-    /// API server URL (defaults to https://sandseal.io)
-    #[arg(long, global = true)]
+    /// API server URL
+    #[arg(long, global = true, env = "SANDSEAL_API_URL")]
     pub api_url: Option<String>,
 }
 
@@ -107,7 +107,7 @@ pub struct ChatArgs {
     #[arg(short, long)]
     pub prompt: String,
 
-    /// API server URL (defaults to https://sandseal.io)
-    #[arg(long)]
+    /// API server URL
+    #[arg(long, env = "SANDSEAL_API_URL")]
     pub api_url: Option<String>,
 }
