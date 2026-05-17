@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "sandseal", about = "Isolated Docker sandboxes for AI coding agents")]
+#[command(name = "sandseal", version, about = "Isolated Docker sandboxes for AI coding agents")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -28,6 +28,10 @@ pub enum Command {
     Whoami,
     /// Connect to a remote session via relay
     Connect(ConnectArgs),
+    /// Pair this device with a browser session
+    Pair(PairArgs),
+    /// Run Claude Code and bridge output to a remote session
+    Chat(ChatArgs),
 }
 
 #[derive(Parser)]
@@ -68,6 +72,40 @@ pub struct ConnectArgs {
     /// Project directory (defaults to current directory)
     #[arg(default_value = ".")]
     pub path: PathBuf,
+
+    /// API server URL (defaults to https://sandseal.io)
+    #[arg(long)]
+    pub api_url: Option<String>,
+}
+
+#[derive(Parser)]
+pub struct PairArgs {
+    /// Pairing mode
+    #[command(subcommand)]
+    pub mode: PairMode,
+
+    /// API server URL (defaults to https://sandseal.io)
+    #[arg(long, global = true)]
+    pub api_url: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum PairMode {
+    /// Pair via QR code — display URL for browser to scan
+    Qr,
+    /// Pair via password — display password for manual entry
+    Password,
+}
+
+#[derive(Parser)]
+pub struct ChatArgs {
+    /// Project directory (defaults to current directory)
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Prompt to send to Claude Code
+    #[arg(short, long)]
+    pub prompt: String,
 
     /// API server URL (defaults to https://sandseal.io)
     #[arg(long)]

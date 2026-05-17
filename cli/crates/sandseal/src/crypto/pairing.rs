@@ -103,10 +103,14 @@ pub struct PairingResult {
 /// Password-based pairing: derive shared key from password + salt.
 pub struct PasswordPairing {
     pub salt: [u8; 16],
-    pub shared_key: [u8; 32],
+    shared_key: [u8; 32],
 }
 
 impl PasswordPairing {
+    pub fn shared_secret(&self) -> &[u8; 32] {
+        &self.shared_key
+    }
+
     pub fn initiate(password: &str) -> Result<Self> {
         let salt = encrypt::generate_salt();
         let shared_key = encrypt::derive_key_from_password(password.as_bytes(), &salt)?;

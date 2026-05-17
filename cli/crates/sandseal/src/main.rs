@@ -42,6 +42,49 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
+        Command::Pair(args) => {
+            match args.mode {
+                cli::PairMode::Qr => remote::pair::pair_qr(args.api_url.as_deref()).await?,
+                cli::PairMode::Password => remote::pair::pair_password(args.api_url.as_deref()).await?,
+            }
+        }
+        Command::Chat(args) => {
+            let project_dir = std::fs::canonicalize(&args.path)
+                .context("project directory does not exist")?;
+            let token = auth::token::require_valid_token()?;
+
+            let base = args.api_url.as_deref().unwrap_or("https://sandseal.io");
+            let client = reqwest::Client::new();
+            let resp: serde_json::Value = client
+                .post(format!("{base}/api/sessions"))
+                .bearer_auth(&token.access_token)
+                .json(&serde_json::json!({
+                    "projectName": project_dir.file_name()
+                        .unwrap_or_default().to_string_lossy(),
+                    "projectDir": project_dir.to_string_lossy(),
+                    "instanceName": "chat",
+                }))
+                .send()
+                .await
+                .context("failed to create session")?
+                .error_for_status()
+                .context("API returned error")?
+                .json()
+                .await?;
+
+            let relay_url = resp["relayUrl"].as_str()
+                .context("missing relayUrl in response")?.to_string();
+            let relay_token = resp["relayToken"].as_str()
+                .context("missing relayToken in response")?.to_string();
+
+            remote::chat::bridge_chat(
+                &project_dir.to_string_lossy(),
+                &args.prompt,
+                relay_url,
+                relay_token,
+            )
+            .await?;
+        }
     }
 
     Ok(())
