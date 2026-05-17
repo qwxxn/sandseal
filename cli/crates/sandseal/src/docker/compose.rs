@@ -59,6 +59,9 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         }
     }
 
+    // Shared apt cache volume (speeds up repeated installs across sandboxes)
+    volumes.push("sandseal-apt-cache:/var/cache/apt".to_string());
+
     // Docker socket (opt-in via settings)
     let docker_passthrough = ctx.settings.docker.as_ref()
         .and_then(|d| d.passthrough)
@@ -86,6 +89,10 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
 
     // Environment
     let mut environment = HashMap::new();
+
+    // Runtime package log path (for auto-suggest after exit)
+    let pkg_log = format!("{}/.sandseal/.runtime-packages", ctx.project_dir.display());
+    environment.insert("SANDSEAL_RUNTIME_PACKAGES".to_string(), pkg_log);
 
     if let Some(env_vars) = &ctx.settings.environment {
         for (key, val) in env_vars {

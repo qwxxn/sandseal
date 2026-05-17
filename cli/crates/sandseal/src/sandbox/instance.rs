@@ -210,11 +210,49 @@ pub fn start(args: StartArgs) -> Result<()> {
     let container_name = runtime::get_container_name(&instance_name)?;
     runtime::wait_and_attach(&container_name)?;
 
+    // Suggest runtime-installed packages
+    suggest_runtime_packages(&project_dir, &settings);
+
     // Cleanup runs via Drop on guard
     let mut guard = guard.lock().unwrap();
     guard.cleanup();
 
     Ok(())
+}
+
+fn suggest_runtime_packages(project_dir: &Path, settings: &crate::config::Settings) {
+    let log_path = project_dir.join(".sandseal/.runtime-packages");
+    let content = match std::fs::read_to_string(&log_path) {
+        Ok(c) if !c.trim().is_empty() => c,
+        _ => return,
+    };
+
+    let existing: Vec<&str> = settings.dependencies.as_ref()
+        .map(|d| d.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
+
+    let new_packages: Vec<&str> = content
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !existing.contains(l))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if new_packages.is_empty() {
+        let _ = std::fs::remove_file(&log_path);
+        return;
+    }
+
+    println!();
+    println!("  Packages installed at runtime (not in settings.json):");
+    for pkg in &new_packages {
+        println!("    - {pkg}");
+    }
+    println!();
+    println!("  Add to \"dependencies\" in .sandseal/settings.json to pre-install next time.");
+
+    let _ = std::fs::remove_file(&log_path);
 }
 
 pub fn destroy(args: DestroyArgs) -> Result<()> {

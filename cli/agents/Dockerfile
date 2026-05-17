@@ -104,6 +104,10 @@ USER root
 RUN rm -rf /tmp/agent-installs
 RUN rm -rf /tmp/setup-scripts
 
+# apt-get wrapper (logs runtime-installed packages for auto-suggest)
+COPY apt-wrapper.sh /usr/local/bin/apt-get
+RUN chmod +x /usr/local/bin/apt-get
+
 # Prepare entrypoint script
 COPY entrypoint.sh /tmp/entrypoint.sh
 RUN chmod +x /tmp/entrypoint.sh
