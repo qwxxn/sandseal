@@ -25,7 +25,7 @@ async fn create_pair_session(api_url: &str, mode: &str) -> Result<PairSessionRes
     let client = reqwest::Client::new();
 
     let resp: PairSessionResponse = client
-        .post(format!("{api_url}/api/pair"))
+        .post(format!("{api_url}/api/pair/session"))
         .bearer_auth(&token.access_token)
         .json(&serde_json::json!({ "mode": mode }))
         .send()
