@@ -27,7 +27,7 @@ struct TokenResponse {
 /// 2. Display URL + user code
 /// 3. Poll for token until authorized or expired
 pub async fn login(api_url: Option<&str>) -> Result<()> {
-    let base = api_url.unwrap_or("https://sandseal.io");
+    let base = crate::cli::resolve_api_url(api_url);
     let device_url = format!("{base}/api/auth/device");
     let poll_url = format!("{base}/api/auth/device/token");
 

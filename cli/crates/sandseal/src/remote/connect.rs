@@ -4,10 +4,9 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 use crate::auth::token::require_valid_token;
+use crate::cli;
 use crate::crypto::keys::ensure_identity;
 use crate::remote::relay::RelayClient;
-
-const DEFAULT_API_URL: &str = "https://sandseal.io";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +20,7 @@ pub async fn connect(project_dir: &str, api_url: Option<&str>) -> Result<()> {
     let token = require_valid_token()?;
     let identity = ensure_identity()?;
 
-    let base = api_url.unwrap_or(DEFAULT_API_URL);
+    let base = cli::resolve_api_url(api_url);
     let url = format!("{base}/api/sessions");
 
     info!("creating session for {project_dir}");

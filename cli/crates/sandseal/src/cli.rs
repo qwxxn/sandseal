@@ -1,6 +1,12 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+pub const DEFAULT_API_URL: &str = "https://sandseal.io";
+
+pub fn resolve_api_url(flag: Option<&str>) -> &str {
+    flag.unwrap_or(DEFAULT_API_URL)
+}
+
 #[derive(Parser)]
 #[command(name = "sandseal", version, about = "Isolated Docker sandboxes for AI coding agents")]
 pub struct Cli {

@@ -6,12 +6,11 @@ use tracing::info;
 use url::Url;
 
 use crate::auth::token::require_valid_token;
+use crate::cli;
 use crate::crypto::keys::ensure_identity;
 use crate::crypto::pairing::{
     complete_qr_pairing, create_qr_offer, generate_pairing_password, PasswordPairing,
 };
-
-const DEFAULT_API_URL: &str = "https://sandseal.io";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,7 +113,7 @@ fn save_paired_device(device_name: &str, their_identity: &[u8; 32], shared_secre
 }
 
 pub async fn pair_qr(api_url: Option<&str>) -> Result<()> {
-    let base = api_url.unwrap_or(DEFAULT_API_URL);
+    let base = cli::resolve_api_url(api_url);
     let identity = ensure_identity()?;
 
     println!("  Creating pairing session...");
@@ -177,7 +176,7 @@ pub async fn pair_qr(api_url: Option<&str>) -> Result<()> {
 }
 
 pub async fn pair_password(api_url: Option<&str>) -> Result<()> {
-    let base = api_url.unwrap_or(DEFAULT_API_URL);
+    let base = cli::resolve_api_url(api_url);
     let identity = ensure_identity()?;
 
     println!("  Creating pairing session...");

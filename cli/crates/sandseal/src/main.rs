@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
                 .context("project directory does not exist")?;
             let token = auth::token::require_valid_token()?;
 
-            let base = args.api_url.as_deref().unwrap_or("https://sandseal.io");
+            let base = cli::resolve_api_url(args.api_url.as_deref());
             let client = reqwest::Client::new();
             let resp: serde_json::Value = client
                 .post(format!("{base}/api/sessions"))
