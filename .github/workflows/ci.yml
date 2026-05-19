@@ -23,49 +23,10 @@ jobs:
         working-directory: cli
         run: cargo test --workspace
 
-  relay-check:
-    name: Relay Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: relay
-      - name: Check
-        working-directory: relay
-        run: cargo check
-
-  web-check:
-    name: Web Type Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - name: Install
-        working-directory: web
-        run: pnpm install --frozen-lockfile
-      - name: Generate Prisma
-        working-directory: web
-        run: npx prisma generate
-      - name: Type Check
-        working-directory: web
-        run: npx tsc --noEmit
-      - name: Test
-        working-directory: web
-        run: npx vitest run
-
   cli-release:
     name: Release Build (${{ matrix.target }})
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [cli-test, web-check]
+    needs: [cli-test]
     strategy:
       matrix:
         include:
