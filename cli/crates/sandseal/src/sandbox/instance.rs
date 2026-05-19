@@ -67,7 +67,49 @@ fn find_script_dir() -> Result<PathBuf> {
     bail!("cannot find sandseal agents directory. Set SANDSEAL_DIR env var.")
 }
 
+pub struct StartedSandbox {
+    pub container_name: String,
+    pub project_name: String,
+    pub project_dir: PathBuf,
+    pub guard: Arc<Mutex<CleanupGuard>>,
+}
+
 pub fn start(args: StartArgs) -> Result<()> {
+    let started = prepare_and_launch(&args)?;
+
+    // Local mode: attach interactively
+    runtime::wait_and_attach(&started.container_name)?;
+
+    suggest_runtime_packages(&started.project_dir, &crate::config::Settings::default());
+
+    let mut guard = started.guard.lock().unwrap();
+    guard.cleanup();
+
+    Ok(())
+}
+
+pub fn start_remote(args: &StartArgs) -> Result<StartedSandbox> {
+    let started = prepare_and_launch(args)?;
+
+    // Wait for container to be running (non-interactive)
+    let max_retries = 20;
+    let delay = std::time::Duration::from_millis(500);
+    for attempt in 1..=max_retries {
+        let output = std::process::Command::new("docker")
+            .args(["inspect", "--format", "{{.State.Status}}", &started.container_name])
+            .output()?;
+        let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        debug!("container state (attempt {attempt}/{max_retries}): {state}");
+        match state.as_str() {
+            "running" => return Ok(started),
+            "exited" | "dead" => bail!("container exited before remote bridge"),
+            _ => std::thread::sleep(delay),
+        }
+    }
+    bail!("container did not start in time");
+}
+
+fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     let project_dir = resolve_project_dir(&args.path)?;
     let project_name = create_project_name(&project_dir);
     let instance_id = generate_instance_id();
@@ -206,18 +248,14 @@ pub fn start(args: StartArgs) -> Result<()> {
     // Compose up
     runtime::compose_up(&compose_cmd, args.rebuild, &compose_env)?;
 
-    // Wait for container and attach
     let container_name = runtime::get_container_name(&instance_name)?;
-    runtime::wait_and_attach(&container_name)?;
 
-    // Suggest runtime-installed packages
-    suggest_runtime_packages(&project_dir, &settings);
-
-    // Cleanup runs via Drop on guard
-    let mut guard = guard.lock().unwrap();
-    guard.cleanup();
-
-    Ok(())
+    Ok(StartedSandbox {
+        container_name,
+        project_name,
+        project_dir,
+        guard,
+    })
 }
 
 fn suggest_runtime_packages(project_dir: &Path, settings: &crate::config::Settings) {

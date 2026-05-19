@@ -50,6 +50,14 @@ pub struct StartArgs {
     #[arg(short, long)]
     pub rebuild: bool,
 
+    /// Expose sandbox as a remote session via relay
+    #[arg(long)]
+    pub remote: bool,
+
+    /// API server URL (for --remote)
+    #[arg(long, env = "SANDSEAL_API_URL")]
+    pub api_url: Option<String>,
+
     /// Arguments passed through to the agent CLI (after --)
     #[arg(last = true)]
     pub agent_args: Vec<String>,

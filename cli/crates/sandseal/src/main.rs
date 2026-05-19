@@ -20,7 +20,13 @@ async fn main() -> Result<()> {
     logging::init(cli.debug);
 
     match cli.command {
-        Command::Start(args) => instance::start(args)?,
+        Command::Start(args) => {
+            if args.remote {
+                start_remote(args).await?;
+            } else {
+                instance::start(args)?;
+            }
+        }
         Command::Destroy(args) => instance::destroy(args)?,
         Command::Status => instance::status()?,
         Command::Login(args) => {
@@ -86,6 +92,59 @@ async fn main() -> Result<()> {
             .await?;
         }
     }
+
+    Ok(())
+}
+
+async fn start_remote(args: cli::StartArgs) -> Result<()> {
+    let base = cli::resolve_api_url(args.api_url.as_deref());
+    let token = auth::token::require_valid_token()?;
+
+    let started = instance::start_remote(&args)?;
+
+    println!("  Sandbox running: {}", started.container_name);
+    println!("  Creating remote session...");
+
+    let client = reqwest::Client::new();
+    let resp: serde_json::Value = client
+        .post(format!("{base}/api/sessions"))
+        .bearer_auth(&token.access_token)
+        .json(&serde_json::json!({
+            "projectName": started.project_dir.file_name()
+                .unwrap_or_default().to_string_lossy(),
+            "projectDir": started.project_dir.to_string_lossy(),
+            "instanceName": started.container_name,
+        }))
+        .send()
+        .await
+        .context("failed to create session")?
+        .error_for_status()
+        .context("API returned error")?
+        .json()
+        .await?;
+
+    let session_id = resp["id"].as_str()
+        .context("missing id in response")?;
+    let relay_url = resp["relayUrl"].as_str()
+        .context("missing relayUrl in response")?.to_string();
+    let relay_token = resp["relayToken"].as_str()
+        .context("missing relayToken in response")?.to_string();
+
+    println!("  Remote session: {session_id}");
+    println!("  Open dashboard to connect.");
+    println!();
+
+    remote::bridge::bridge_container(
+        &started.container_name,
+        relay_url,
+        relay_token,
+    )
+    .await?;
+
+    println!("  Session ended.");
+
+    let mut guard = started.guard.lock().unwrap();
+    guard.cleanup();
 
     Ok(())
 }
