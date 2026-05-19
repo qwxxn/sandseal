@@ -36,7 +36,7 @@ tempfile = "3"
 shellexpand = "3"
 
 # Process / signals
-nix = { version = "0.29", features = ["signal", "process", "user", "term"] }
+nix = { version = "0.29", features = ["signal", "process", "user", "term", "fs"] }
 libc = "0.2"
 ctrlc = "3"
 

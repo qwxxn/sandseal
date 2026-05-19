@@ -106,7 +106,7 @@ pub async fn bridge_container(
     let _stderr_guard = StderrRedirect::to_devnull();
 
     // Container stdin receives from both local keyboard and relay
-    let (to_container_tx, to_container_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (to_container_tx, mut to_container_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     // Container stdout goes to relay (relay handles encryption)
     let (to_relay_tx, to_relay_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
