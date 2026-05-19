@@ -8,6 +8,7 @@ use x25519_dalek::PublicKey as X25519Public;
 
 use crate::crypto::keys::X25519KeyPair;
 use crate::crypto::session::{SessionKeys, MessageType};
+use super::overlay::OverlayMessage;
 
 pub struct RelayClient {
     relay_url: String,
@@ -36,12 +37,20 @@ impl RelayClient {
         self,
         mut local_rx: mpsc::UnboundedReceiver<Vec<u8>>,
         local_tx: mpsc::UnboundedSender<Vec<u8>>,
+        overlay_tx: Option<mpsc::UnboundedSender<OverlayMessage>>,
     ) -> Result<()> {
         let mut url = Url::parse(&self.relay_url)
             .context("invalid relay URL")?;
         url.query_pairs_mut().append_pair("role", "cli");
 
+        let overlay = |msg: OverlayMessage| {
+            if let Some(tx) = &overlay_tx {
+                let _ = tx.send(msg);
+            }
+        };
+
         info!("connecting to relay: {}", url.host_str().unwrap_or("unknown"));
+        overlay(OverlayMessage::info("connecting to relay…"));
 
         let (ws_stream, _) = connect_async(url.as_str())
             .await
@@ -55,6 +64,7 @@ impl RelayClient {
             .context("failed to send auth token")?;
 
         info!("authenticated with relay");
+        overlay(OverlayMessage::info("authenticated with relay"));
 
         // Step 2: Key exchange — send our ephemeral pubkey
         let ephemeral = X25519KeyPair::generate();
@@ -63,6 +73,7 @@ impl RelayClient {
             .context("failed to send ephemeral pubkey")?;
 
         info!("sent ephemeral pubkey, waiting for peer...");
+        overlay(OverlayMessage::info("waiting for browser…"));
 
         // Step 3: Receive peer's ephemeral pubkey
         let peer_pubkey = loop {
@@ -83,6 +94,7 @@ impl RelayClient {
         };
 
         info!("key exchange complete, session encrypted");
+        overlay(OverlayMessage::info("session encrypted"));
 
         // Step 4: Derive session keys (CLI is always the initiator)
         let mut session_keys =
@@ -131,6 +143,7 @@ impl RelayClient {
                                 Ok(_) => {}
                                 Err(_) if data.len() == 32 => {
                                     info!("browser reconnected, performing re-key exchange");
+                                    overlay(OverlayMessage::info("browser reconnected"));
                                     let new_ephemeral = X25519KeyPair::generate();
                                     if ws_sink.send(Message::Binary(
                                         new_ephemeral.public.as_bytes().to_vec().into()
@@ -145,6 +158,7 @@ impl RelayClient {
                                         &new_ephemeral, &peer_pub, true,
                                     );
                                     info!("re-key exchange complete");
+                                    overlay(OverlayMessage::info("session re-encrypted"));
                                 }
                                 Err(e) => {
                                     error!("decrypt error: {e}");
@@ -163,6 +177,7 @@ impl RelayClient {
         }
 
         info!("relay connection closed (sent {} messages)", session_keys.send_count());
+        overlay(OverlayMessage::info("relay disconnected"));
         Ok(())
     }
 }

@@ -68,7 +68,7 @@ pub async fn bridge_chat(
 
     let relay = RelayClient::new(relay_url, relay_token);
     let relay_handle = tokio::spawn(async move {
-        relay.connect_and_run(to_relay_rx, from_relay_tx).await
+        relay.connect_and_run(to_relay_rx, from_relay_tx, None).await
     });
 
     // Echo initial prompt so the browser shows it as a user message

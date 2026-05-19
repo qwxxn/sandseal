@@ -82,7 +82,7 @@ pub async fn connect(project_dir: &str, api_url: Option<&str>) -> Result<()> {
         }
     });
 
-    relay.connect_and_run(local_rx_in, local_tx).await?;
+    relay.connect_and_run(local_rx_in, local_tx, None).await?;
 
     output_handle.abort();
     input_handle.abort();

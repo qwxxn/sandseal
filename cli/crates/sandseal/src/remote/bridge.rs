@@ -9,6 +9,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use crate::remote::overlay::{self, OverlayMessage};
 use crate::remote::relay::RelayClient;
 
 struct RawModeGuard {
@@ -110,11 +111,15 @@ pub async fn bridge_container(
     // Container stdout goes to relay (relay handles encryption)
     let (to_relay_tx, to_relay_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
+    // Overlay for transient status messages
+    let (overlay_tx, overlay_rx) = mpsc::unbounded_channel::<OverlayMessage>();
+    let overlay_handle = tokio::spawn(overlay::run_overlay(overlay_rx, ws.ws_col));
+
     // Background: relay connection + key exchange + encrypted bridge
     let relay_from_tx = to_container_tx.clone();
     let relay_handle = tokio::spawn(async move {
         let relay = RelayClient::new(relay_url, relay_token);
-        let _ = relay.connect_and_run(to_relay_rx, relay_from_tx).await;
+        let _ = relay.connect_and_run(to_relay_rx, relay_from_tx, Some(overlay_tx)).await;
     });
 
     // PTY master read → local terminal + relay (blocking thread — PTY fds aren't async-friendly)
@@ -182,6 +187,7 @@ pub async fn bridge_container(
     let _ = child.wait().await;
 
     relay_handle.abort();
+    overlay_handle.abort();
     stdin_handle.abort();
     read_handle.abort();
     drop(write_handle);
