@@ -59,6 +59,9 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         }
     }
 
+    // Persistent agent home volume (survives container restarts — keeps CLI logins, installed tools, etc.)
+    volumes.push(format!("sandseal-agent-home:{}", ctx.sandbox_home));
+
     // Shared apt cache volume (speeds up repeated installs across sandboxes)
     volumes.push("sandseal-apt-cache:/var/cache/apt".to_string());
 
@@ -271,6 +274,8 @@ fn format_compose_yaml(
 
     // Top-level volumes declaration (required for named volumes)
     yaml.push_str("\nvolumes:\n");
+    yaml.push_str("  sandseal-agent-home:\n");
+    yaml.push_str("    external: false\n");
     yaml.push_str("  sandseal-apt-cache:\n");
     yaml.push_str("    external: false\n");
 
