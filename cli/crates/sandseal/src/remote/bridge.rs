@@ -113,7 +113,7 @@ pub async fn bridge_container(
 
     // Overlay for transient status messages
     let (overlay_tx, overlay_rx) = mpsc::unbounded_channel::<OverlayMessage>();
-    let overlay_handle = tokio::spawn(overlay::run_overlay(overlay_rx, ws.ws_col));
+    let overlay_handle = tokio::spawn(overlay::run_overlay(overlay_rx));
 
     // Background: relay connection + key exchange + encrypted bridge
     let relay_from_tx = to_container_tx.clone();
