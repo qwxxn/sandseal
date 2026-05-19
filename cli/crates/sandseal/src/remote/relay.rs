@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use anyhow::{Result, Context, bail};
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, error};
 use url::Url;
@@ -31,6 +29,9 @@ impl RelayClient {
     /// 2. Send ephemeral X25519 pubkey (32 bytes) as first binary message
     /// 3. Receive peer's pubkey (32 bytes) as first binary message from them
     /// 4. Derive SessionKeys, switch to encrypted framing
+    ///
+    /// If the browser reconnects (page refresh), it sends a new 32-byte pubkey.
+    /// The CLI detects this (encrypted frames are always >= 33 bytes) and re-keys.
     pub async fn connect_and_run(
         self,
         mut local_rx: mpsc::UnboundedReceiver<Vec<u8>>,
@@ -84,82 +85,84 @@ impl RelayClient {
         info!("key exchange complete, session encrypted");
 
         // Step 4: Derive session keys (CLI is always the initiator)
-        let session_keys = Arc::new(Mutex::new(
-            SessionKeys::from_key_exchange(&ephemeral, &peer_pubkey, true)
-        ));
+        let mut session_keys =
+            SessionKeys::from_key_exchange(&ephemeral, &peer_pubkey, true);
 
-        // Encrypted communication loop
-        let send_keys = session_keys.clone();
-        let send_handle = tokio::spawn(async move {
-            while let Some(data) = local_rx.recv().await {
-                let frame = {
-                    let mut keys = send_keys.lock().await;
-                    if keys.needs_rotation() {
-                        let rotation_frame = keys.seal(MessageType::KeyRotation, &[]);
-                        if let Ok(rf) = rotation_frame {
+        // Single select! loop — no shared state, no race conditions on re-key
+        loop {
+            tokio::select! {
+                Some(data) = local_rx.recv() => {
+                    if session_keys.needs_rotation() {
+                        if let Ok(rf) = session_keys.seal(MessageType::KeyRotation, &[]) {
                             let _ = ws_sink.send(Message::Binary(rf.into())).await;
                         }
-                        keys.rotate();
-                        info!("key rotation performed (gen {})", keys.generation());
+                        session_keys.rotate();
+                        info!("key rotation performed (gen {})", session_keys.generation());
                     }
-                    keys.seal(MessageType::Data, &data)
-                };
-                match frame {
-                    Ok(f) => {
-                        if ws_sink.send(Message::Binary(f.into())).await.is_err() {
+                    match session_keys.seal(MessageType::Data, &data) {
+                        Ok(f) => {
+                            if ws_sink.send(Message::Binary(f.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            error!("encrypt error: {e}");
                             break;
                         }
                     }
-                    Err(e) => {
-                        error!("encrypt error: {e}");
-                        break;
-                    }
                 }
-            }
-        });
-
-        while let Some(msg) = ws_source.next().await {
-            match msg {
-                Ok(Message::Binary(data)) => {
-                    let result = {
-                        let mut keys = session_keys.lock().await;
-                        keys.open(&data)
-                    };
-                    match result {
-                        Ok((msg_type, plaintext)) => match msg_type {
-                            MessageType::Data => {
-                                if local_tx.send(plaintext).is_err() {
+                msg = ws_source.next() => {
+                    match msg {
+                        Some(Ok(Message::Binary(data))) => {
+                            match session_keys.open(&data) {
+                                Ok((MessageType::Data, plaintext)) => {
+                                    if local_tx.send(plaintext).is_err() {
+                                        break;
+                                    }
+                                }
+                                Ok((MessageType::KeyRotation, _)) => {
+                                    session_keys.rotate();
+                                    info!("peer rotated keys (gen {})", session_keys.generation());
+                                }
+                                Ok((MessageType::Close, _)) => {
+                                    info!("received close from peer");
                                     break;
                                 }
+                                Ok(_) => {}
+                                Err(_) if data.len() == 32 => {
+                                    info!("browser reconnected, performing re-key exchange");
+                                    let new_ephemeral = X25519KeyPair::generate();
+                                    if ws_sink.send(Message::Binary(
+                                        new_ephemeral.public.as_bytes().to_vec().into()
+                                    )).await.is_err() {
+                                        break;
+                                    }
+
+                                    let mut key_bytes = [0u8; 32];
+                                    key_bytes.copy_from_slice(&data);
+                                    let peer_pub = X25519Public::from(key_bytes);
+                                    session_keys = SessionKeys::from_key_exchange(
+                                        &new_ephemeral, &peer_pub, true,
+                                    );
+                                    info!("re-key exchange complete");
+                                }
+                                Err(e) => {
+                                    error!("decrypt error: {e}");
+                                }
                             }
-                            MessageType::KeyRotation => {
-                                let mut keys = session_keys.lock().await;
-                                keys.rotate();
-                                info!("peer rotated keys (gen {})", keys.generation());
-                            }
-                            MessageType::Close => {
-                                info!("received close from peer");
-                                break;
-                            }
-                            _ => {}
-                        },
-                        Err(e) => {
-                            error!("decrypt error: {e}");
                         }
+                        Some(Ok(Message::Close(_))) | None => break,
+                        Some(Err(e)) => {
+                            error!("WebSocket error: {e}");
+                            break;
+                        }
+                        _ => {}
                     }
                 }
-                Ok(Message::Close(_)) => break,
-                Err(e) => {
-                    error!("WebSocket error: {e}");
-                    break;
-                }
-                _ => {}
             }
         }
 
-        send_handle.abort();
-        let keys = session_keys.lock().await;
-        info!("relay connection closed (sent {} messages)", keys.send_count());
+        info!("relay connection closed (sent {} messages)", session_keys.send_count());
         Ok(())
     }
 }
