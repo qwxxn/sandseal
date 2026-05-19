@@ -1,4 +1,5 @@
 use std::io::IsTerminal;
+use std::os::unix::io::AsRawFd;
 
 use anyhow::{Context, Result};
 use nix::sys::termios;
@@ -6,7 +7,7 @@ use nix::pty::{openpty, Winsize};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::debug;
 
 use crate::remote::relay::RelayClient;
 
@@ -20,8 +21,29 @@ impl Drop for RawModeGuard {
     }
 }
 
+struct StderrRedirect {
+    saved_fd: i32,
+}
+
+impl StderrRedirect {
+    fn to_devnull() -> Option<Self> {
+        let stderr_fd = std::io::stderr().as_raw_fd();
+        let saved = nix::unistd::dup(stderr_fd).ok()?;
+        let devnull = std::fs::File::open("/dev/null").ok()?;
+        nix::unistd::dup2(devnull.as_raw_fd(), stderr_fd).ok()?;
+        Some(Self { saved_fd: saved })
+    }
+}
+
+impl Drop for StderrRedirect {
+    fn drop(&mut self) {
+        let stderr_fd = std::io::stderr().as_raw_fd();
+        let _ = nix::unistd::dup2(self.saved_fd, stderr_fd);
+        let _ = nix::unistd::close(self.saved_fd);
+    }
+}
+
 fn get_terminal_size() -> Winsize {
-    use std::os::unix::io::AsRawFd;
     let fd = std::io::stdin().as_raw_fd();
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
@@ -80,8 +102,11 @@ pub async fn bridge_container(
         None
     };
 
+    // Suppress tracing stderr output during interactive session (would corrupt TUI)
+    let _stderr_guard = StderrRedirect::to_devnull();
+
     // Container stdin receives from both local keyboard and relay
-    let (to_container_tx, mut to_container_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (to_container_tx, to_container_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     // Container stdout goes to relay (relay handles encryption)
     let (to_relay_tx, to_relay_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
@@ -89,10 +114,7 @@ pub async fn bridge_container(
     let relay_from_tx = to_container_tx.clone();
     let relay_handle = tokio::spawn(async move {
         let relay = RelayClient::new(relay_url, relay_token);
-        if let Err(e) = relay.connect_and_run(to_relay_rx, relay_from_tx).await {
-            error!("relay: {e}");
-        }
-        debug!("relay task ended");
+        let _ = relay.connect_and_run(to_relay_rx, relay_from_tx).await;
     });
 
     // PTY master read → local terminal + relay (blocking thread — PTY fds aren't async-friendly)
@@ -110,10 +132,7 @@ pub async fn bridge_container(
                         if tx.send(buf[..n].to_vec()).is_err() { break; }
                     }
                     Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(e) => {
-                        debug!("pty master read error: {e}");
-                        break;
-                    }
+                    Err(_) => break,
                 }
             }
         });
@@ -128,7 +147,6 @@ pub async fn bridge_container(
                 }
                 let _ = to_relay_tx.send(data);
             }
-            debug!("pty master read ended");
         })
     };
 
@@ -140,7 +158,6 @@ pub async fn bridge_container(
         while let Some(data) = to_container_rx.blocking_recv() {
             if file.write_all(&data).is_err() { break; }
         }
-        debug!("pty master write ended");
     });
 
     // Local stdin → container (via PTY)
@@ -159,15 +176,10 @@ pub async fn bridge_container(
                 Err(_) => break,
             }
         }
-        debug!("local stdin ended");
     });
 
     // Wait for docker attach to exit (container session ended)
-    let status = child.wait().await;
-    match &status {
-        Ok(s) => info!("session ended (exit {})", s.code().unwrap_or(-1)),
-        Err(e) => warn!("wait error: {e}"),
-    }
+    let _ = child.wait().await;
 
     relay_handle.abort();
     stdin_handle.abort();
