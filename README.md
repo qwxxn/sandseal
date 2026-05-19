@@ -7,7 +7,7 @@ Run Claude Code (and other AI agents) in a secure, containerized environment wit
 ## Quick start
 
 ```bash
-curl -fsSL https://sandseal.io/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sandseal/sandseal/main/scripts/install.sh | bash
 ```
 
 Then in any project directory:
