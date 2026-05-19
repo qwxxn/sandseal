@@ -13,9 +13,4 @@ fi
 
 echo "Starting agent CLI..." >&2
 
-# Start Claude Code inside a tmux session
-tmux new-session -d -s main "$@"
-tmux set-option -g mouse on
-
-# Attach to tmux in foreground (docker attach sees this)
-exec tmux attach -t main
+exec "$@"

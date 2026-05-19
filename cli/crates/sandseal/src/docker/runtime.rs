@@ -133,7 +133,7 @@ pub fn wait_and_attach(container_name: &str) -> Result<()> {
 /// Attach to a running container (interactive).
 fn attach(container_name: &str) -> Result<()> {
     let status = Command::new("docker")
-        .args(["attach", container_name])
+        .args(["attach", "--sig-proxy=false", container_name])
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

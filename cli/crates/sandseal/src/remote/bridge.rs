@@ -62,9 +62,9 @@ fn get_terminal_size() -> Winsize {
 /// Attach to a running Docker container and bridge its stdin/stdout to both
 /// the local terminal (interactive) and the relay (for web dashboard access).
 ///
-/// Uses a host-side PTY so docker attach sees a real terminal (required for
-/// the container's tmux session). Output from the PTY master is forwarded to
-/// both the local terminal and the encrypted relay.
+/// Uses a host-side PTY so docker attach sees a real terminal.
+/// Output from the PTY master is forwarded to both the local terminal
+/// and the encrypted relay.
 pub async fn bridge_container(
     container_name: &str,
     relay_url: String,
@@ -82,7 +82,7 @@ pub async fn bridge_container(
     let slave_clone2 = pty.slave.try_clone().context("dup slave")?;
 
     let mut child = Command::new("docker")
-        .args(["attach", container_name])
+        .args(["attach", "--sig-proxy=false", container_name])
         .stdin(std::process::Stdio::from(pty.slave))
         .stdout(std::process::Stdio::from(slave_clone1))
         .stderr(std::process::Stdio::from(slave_clone2))

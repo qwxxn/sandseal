@@ -27,7 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nano \
     vim \
     ripgrep \
-    tmux \
     ca-certificates \
     gnupg \
     sudo \
