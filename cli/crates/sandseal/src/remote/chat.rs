@@ -2,31 +2,31 @@ use anyhow::{Result, Context};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 
 use crate::remote::relay::RelayClient;
 
-/// Bridge Claude Code's `--output-format stream-json` output to the relay.
-///
-/// Spawns Claude Code with the given prompt, connects to relay (with key
-/// exchange), then forwards encrypted frames bidirectionally.
-pub async fn bridge_chat(
+async fn run_claude_turn(
     project_dir: &str,
     prompt: &str,
-    relay_url: String,
-    relay_token: String,
+    is_continuation: bool,
+    to_relay_tx: &mpsc::UnboundedSender<Vec<u8>>,
 ) -> Result<()> {
+    let mut args = Vec::new();
+    if is_continuation {
+        args.push("-c");
+    }
+    args.extend_from_slice(&[
+        "--output-format", "stream-json",
+        "--dangerously-skip-permissions",
+        "-p", prompt,
+    ]);
+
     let mut child = Command::new("claude")
-        .args([
-            "--output-format",
-            "stream-json",
-            "--dangerously-skip-permissions",
-            "-p",
-            prompt,
-        ])
+        .args(&args)
         .current_dir(project_dir)
         .stdout(std::process::Stdio::piped())
-        .stdin(std::process::Stdio::piped())
+        .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
@@ -35,47 +35,92 @@ pub async fn bridge_chat(
     let stdout = child.stdout.take().context("no stdout")?;
     let mut reader = BufReader::new(stdout).lines();
 
+    while let Ok(Some(line)) = reader.next_line().await {
+        if line.is_empty() {
+            continue;
+        }
+        debug!("claude event: {}", &line[..line.len().min(80)]);
+        if to_relay_tx.send(line.into_bytes()).is_err() {
+            break;
+        }
+    }
+
+    let status = child.wait().await?;
+    if !status.success() {
+        anyhow::bail!("claude exited with status: {status}");
+    }
+    Ok(())
+}
+
+/// Bridge Claude Code chat to the relay with multi-turn support.
+///
+/// Each user message spawns a new `claude` process. The first turn uses `-p`,
+/// follow-ups use `-c -p` to continue the conversation. The relay connection
+/// stays alive across turns.
+pub async fn bridge_chat(
+    project_dir: &str,
+    prompt: &str,
+    relay_url: String,
+    relay_token: String,
+) -> Result<()> {
     let (to_relay_tx, to_relay_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let (from_relay_tx, mut from_relay_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-    // Read claude stdout → send to relay
-    let tx = to_relay_tx.clone();
-    let read_handle = tokio::spawn(async move {
-        while let Ok(Some(line)) = reader.next_line().await {
-            if line.is_empty() {
-                continue;
+    let relay = RelayClient::new(relay_url, relay_token);
+    let relay_handle = tokio::spawn(async move {
+        relay.connect_and_run(to_relay_rx, from_relay_tx).await
+    });
+
+    // Echo initial prompt so the browser shows it as a user message
+    let _ = to_relay_tx.send(prompt.as_bytes().to_vec());
+
+    // First turn
+    match run_claude_turn(project_dir, prompt, false, &to_relay_tx).await {
+        Ok(()) => {
+            let _ = to_relay_tx.send(b"{\"type\":\"turn_complete\"}".to_vec());
+        }
+        Err(e) => {
+            warn!("claude turn failed: {e}");
+            let msg = format!("{{\"type\":\"error\",\"error_message\":{}}}", serde_json::json!(e.to_string()));
+            let _ = to_relay_tx.send(msg.into_bytes());
+        }
+    }
+
+    info!("first turn complete, waiting for follow-up messages");
+
+    // Multi-turn loop: wait for browser messages
+    loop {
+        match from_relay_rx.recv().await {
+            Some(data) => {
+                let message = String::from_utf8_lossy(&data).to_string();
+                let trimmed = message.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                info!("received follow-up ({} bytes)", data.len());
+
+                // Echo user message back so the browser can deduplicate
+                let _ = to_relay_tx.send(data);
+
+                match run_claude_turn(project_dir, trimmed, true, &to_relay_tx).await {
+                    Ok(()) => {
+                        let _ = to_relay_tx.send(b"{\"type\":\"turn_complete\"}".to_vec());
+                    }
+                    Err(e) => {
+                        warn!("claude turn failed: {e}");
+                        let msg = format!("{{\"type\":\"error\",\"error_message\":{}}}", serde_json::json!(e.to_string()));
+                        let _ = to_relay_tx.send(msg.into_bytes());
+                    }
+                }
             }
-            debug!("claude event: {}", &line[..line.len().min(80)]);
-            if tx.send(line.into_bytes()).is_err() {
+            None => {
+                info!("relay disconnected, ending chat session");
                 break;
             }
         }
-        info!("claude process output ended");
-    });
+    }
 
-    // Forward relay input → claude stdin
-    let stdin = child.stdin.take();
-    let write_handle = tokio::spawn(async move {
-        if let Some(mut stdin) = stdin {
-            use tokio::io::AsyncWriteExt;
-            while let Some(data) = from_relay_rx.recv().await {
-                if stdin.write_all(&data).await.is_err() {
-                    break;
-                }
-                if stdin.write_all(b"\n").await.is_err() {
-                    break;
-                }
-            }
-        }
-    });
-
-    // Connect to relay with key exchange, then bridge encrypted
-    let relay = RelayClient::new(relay_url, relay_token);
-    let relay_result = relay.connect_and_run(to_relay_rx, from_relay_tx).await;
-
-    read_handle.abort();
-    write_handle.abort();
-    let _ = child.kill().await;
-
-    relay_result
+    relay_handle.abort();
+    Ok(())
 }
