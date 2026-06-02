@@ -18,10 +18,16 @@ main() {
         error "build failed — binary not found at ${binary}"
     fi
 
-    # Install binary
+    # Install binary atomically: copy to a temp file in the same dir, then
+    # rename over the target. A plain cp truncates the destination in place,
+    # which fails with ETXTBSY ("Text file busy") if a sandseal is currently
+    # running; rename(2) just swaps the dir entry and leaves the running
+    # process on its old inode.
     mkdir -p "${INSTALL_DIR}"
-    cp "${binary}" "${INSTALL_DIR}/sandseal"
-    chmod +x "${INSTALL_DIR}/sandseal"
+    local tmp="${INSTALL_DIR}/.sandseal.new.$$"
+    cp "${binary}" "${tmp}"
+    chmod +x "${tmp}"
+    mv -f "${tmp}" "${INSTALL_DIR}/sandseal"
     info "Binary → ${INSTALL_DIR}/sandseal"
 
     # Install agents
