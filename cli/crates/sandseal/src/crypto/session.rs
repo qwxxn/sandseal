@@ -21,6 +21,8 @@ pub enum MessageType {
     Ping = 0x03,
     Pong = 0x04,
     Close = 0x05,
+    /// Terminal resize: payload is `[cols: u16 BE][rows: u16 BE]` (4 bytes).
+    Resize = 0x06,
 }
 
 impl MessageType {
@@ -31,6 +33,7 @@ impl MessageType {
             0x03 => Ok(Self::Ping),
             0x04 => Ok(Self::Pong),
             0x05 => Ok(Self::Close),
+            0x06 => Ok(Self::Resize),
             _ => bail!("unknown message type: 0x{b:02x}"),
         }
     }
@@ -310,7 +313,7 @@ mod tests {
     fn message_types_roundtrip() {
         let (mut alice, mut bob) = make_session_pair();
 
-        for msg_type in [MessageType::Data, MessageType::Ping, MessageType::Pong, MessageType::Close] {
+        for msg_type in [MessageType::Data, MessageType::Ping, MessageType::Pong, MessageType::Close, MessageType::Resize] {
             let frame = alice.seal(msg_type, b"").unwrap();
             let (decoded_type, _) = bob.open(&frame).unwrap();
             assert_eq!(decoded_type, msg_type);

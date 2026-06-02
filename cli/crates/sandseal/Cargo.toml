@@ -65,6 +65,7 @@ tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 url = { workspace = true }
 reqwest = { workspace = true }
+bollard = "0.21.0"
 
 [dev-dependencies]
 assert_cmd = "2"

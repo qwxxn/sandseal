@@ -38,6 +38,7 @@ impl RelayClient {
         mut local_rx: mpsc::UnboundedReceiver<Vec<u8>>,
         local_tx: mpsc::UnboundedSender<Vec<u8>>,
         overlay_tx: Option<mpsc::UnboundedSender<OverlayMessage>>,
+        resize_tx: Option<mpsc::UnboundedSender<(u16, u16)>>,
     ) -> Result<()> {
         let mut url = Url::parse(&self.relay_url)
             .context("invalid relay URL")?;
@@ -140,6 +141,13 @@ impl RelayClient {
                                     info!("received close from peer");
                                     break;
                                 }
+                                Ok((MessageType::Resize, payload)) => {
+                                    if let (Some(tx), Some(size)) =
+                                        (&resize_tx, parse_resize(&payload))
+                                    {
+                                        let _ = tx.send(size);
+                                    }
+                                }
                                 Ok(_) => {}
                                 Err(_) if data.len() == 32 => {
                                     info!("browser reconnected, performing re-key exchange");
@@ -179,5 +187,44 @@ impl RelayClient {
         info!("relay connection closed (sent {} messages)", session_keys.send_count());
         overlay(OverlayMessage::info("relay disconnected"));
         Ok(())
+    }
+}
+
+/// Parse a `Resize` payload `[cols: u16 BE][rows: u16 BE]` into `(rows, cols)`.
+/// Returns `None` for malformed or zero-sized payloads.
+fn parse_resize(payload: &[u8]) -> Option<(u16, u16)> {
+    if payload.len() != 4 {
+        return None;
+    }
+    let cols = u16::from_be_bytes([payload[0], payload[1]]);
+    let rows = u16::from_be_bytes([payload[2], payload[3]]);
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    Some((rows, cols))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_resize;
+
+    #[test]
+    fn parses_valid_payload() {
+        // cols = 120, rows = 40
+        let payload = [0x00, 0x78, 0x00, 0x28];
+        assert_eq!(parse_resize(&payload), Some((40, 120)));
+    }
+
+    #[test]
+    fn rejects_wrong_length() {
+        assert_eq!(parse_resize(&[0x00, 0x78, 0x00]), None);
+        assert_eq!(parse_resize(&[0x00, 0x78, 0x00, 0x28, 0x00]), None);
+        assert_eq!(parse_resize(&[]), None);
+    }
+
+    #[test]
+    fn rejects_zero_dimensions() {
+        assert_eq!(parse_resize(&[0x00, 0x00, 0x00, 0x28]), None);
+        assert_eq!(parse_resize(&[0x00, 0x78, 0x00, 0x00]), None);
     }
 }

@@ -1,9 +1,11 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::thread;
 use std::time::Duration;
+use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, error, info};
+
+use crate::docker::tty;
 
 /// Environment variables needed by the base docker-compose.yml template.
 pub struct ComposeEnv {
@@ -93,7 +95,7 @@ pub fn compose_down(cmd: &[String]) -> Result<()> {
 }
 
 /// Wait for the container to be in "running" state, then attach.
-pub fn wait_and_attach(container_name: &str) -> Result<()> {
+pub async fn wait_and_attach(container_name: &str) -> Result<()> {
     let max_retries = 20;
     let delay = Duration::from_millis(500);
 
@@ -109,7 +111,7 @@ pub fn wait_and_attach(container_name: &str) -> Result<()> {
         match state.as_str() {
             "running" => {
                 info!("container is running, attaching...");
-                return attach(container_name);
+                return attach(container_name).await;
             }
             "exited" | "dead" => {
                 let logs = Command::new("docker")
@@ -122,7 +124,7 @@ pub fn wait_and_attach(container_name: &str) -> Result<()> {
                 );
             }
             _ => {
-                thread::sleep(delay);
+                tokio::time::sleep(delay).await;
             }
         }
     }
@@ -130,15 +132,50 @@ pub fn wait_and_attach(container_name: &str) -> Result<()> {
     bail!("container did not reach running state after {max_retries} retries");
 }
 
-/// Attach to a running container (interactive).
-fn attach(container_name: &str) -> Result<()> {
-    let status = Command::new("docker")
+/// Attach to a running container (interactive), propagating terminal resizes.
+///
+/// `docker attach` only sets the TTY size on connect, so we push the initial
+/// size and every subsequent SIGWINCH to the container via the Docker API.
+async fn attach(container_name: &str) -> Result<()> {
+    let docker = tty::connect();
+
+    // Set the correct size before the agent draws its first frame.
+    if let (Some(docker), Some((rows, cols))) = (&docker, tty::host_terminal_size()) {
+        tty::resize(docker, container_name, rows, cols).await;
+    }
+
+    // Forward later resizes for as long as the session is attached.
+    let resize_task = docker.map(|docker| {
+        let name = container_name.to_string();
+        tokio::spawn(async move {
+            let mut winch = match signal(SignalKind::window_change()) {
+                Ok(s) => s,
+                Err(e) => {
+                    debug!("SIGWINCH handler unavailable, resize disabled: {e}");
+                    return;
+                }
+            };
+            while winch.recv().await.is_some() {
+                if let Some((rows, cols)) = tty::host_terminal_size() {
+                    tty::resize(&docker, &name, rows, cols).await;
+                }
+            }
+        })
+    });
+
+    let mut child = tokio::process::Command::new("docker")
         .args(["attach", "--sig-proxy=false", container_name])
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .status()
+        .spawn()
         .context("failed to attach to container")?;
+
+    let status = child.wait().await.context("docker attach failed")?;
+
+    if let Some(task) = resize_task {
+        task.abort();
+    }
 
     debug!("container exited with code: {}", status.code().unwrap_or(-1));
     Ok(())

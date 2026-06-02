@@ -74,11 +74,11 @@ pub struct StartedSandbox {
     pub guard: Arc<Mutex<CleanupGuard>>,
 }
 
-pub fn start(args: StartArgs) -> Result<()> {
+pub async fn start(args: StartArgs) -> Result<()> {
     let started = prepare_and_launch(&args)?;
 
     // Local mode: attach interactively
-    runtime::wait_and_attach(&started.container_name)?;
+    runtime::wait_and_attach(&started.container_name).await?;
 
     suggest_runtime_packages(&started.project_dir, &crate::config::Settings::default());
 

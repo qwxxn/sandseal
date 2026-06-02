@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
             if args.remote {
                 start_remote(args).await?;
             } else {
-                instance::start(args)?;
+                instance::start(args).await?;
             }
         }
         Command::Destroy(args) => instance::destroy(args)?,

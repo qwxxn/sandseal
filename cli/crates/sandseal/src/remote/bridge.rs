@@ -6,11 +6,84 @@ use nix::sys::termios;
 use nix::pty::{openpty, Winsize};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use crate::docker::tty;
 use crate::remote::overlay::{self, OverlayMessage};
 use crate::remote::relay::RelayClient;
+
+/// A terminal-size update from one of the two viewers of the shared PTY.
+enum SizeUpdate {
+    Local(u16, u16),
+    Browser(u16, u16),
+}
+
+/// The container has a single TTY size, but local and browser viewers may
+/// differ — resize to the smallest of the two so content fits both (tmux-style).
+fn combine_sizes(local: Option<(u16, u16)>, browser: Option<(u16, u16)>) -> Option<(u16, u16)> {
+    match (local, browser) {
+        (Some((lr, lc)), Some((br, bc))) => Some((lr.min(br), lc.min(bc))),
+        (Some(size), None) | (None, Some(size)) => Some(size),
+        (None, None) => None,
+    }
+}
+
+/// Wire up terminal-resize propagation for a bridged session: a coordinator that
+/// pushes the combined size to the container, a local SIGWINCH watcher, and a
+/// forwarder for browser resizes. Returns the sender the relay feeds browser
+/// resizes into, or `None` if the Docker API is unreachable (resize is a no-op).
+fn spawn_resize_propagation(container_name: &str) -> Option<mpsc::UnboundedSender<(u16, u16)>> {
+    let docker = tty::connect()?;
+    let name = container_name.to_string();
+    let (size_tx, mut size_rx) = mpsc::unbounded_channel::<SizeUpdate>();
+
+    // Coordinator: resize the container to min(local, browser) on every update.
+    tokio::spawn(async move {
+        let mut local: Option<(u16, u16)> = None;
+        let mut browser: Option<(u16, u16)> = None;
+        while let Some(update) = size_rx.recv().await {
+            match update {
+                SizeUpdate::Local(r, c) => local = Some((r, c)),
+                SizeUpdate::Browser(r, c) => browser = Some((r, c)),
+            }
+            if let Some((rows, cols)) = combine_sizes(local, browser) {
+                tty::resize(&docker, &name, rows, cols).await;
+            }
+        }
+    });
+
+    // Seed with the current local size, then follow local SIGWINCH.
+    if let Some((rows, cols)) = tty::host_terminal_size() {
+        let _ = size_tx.send(SizeUpdate::Local(rows, cols));
+    }
+    let local_size_tx = size_tx.clone();
+    tokio::spawn(async move {
+        let mut winch = match signal(SignalKind::window_change()) {
+            Ok(s) => s,
+            Err(e) => {
+                debug!("SIGWINCH handler unavailable, local resize disabled: {e}");
+                return;
+            }
+        };
+        while winch.recv().await.is_some() {
+            if let Some((rows, cols)) = tty::host_terminal_size() {
+                let _ = local_size_tx.send(SizeUpdate::Local(rows, cols));
+            }
+        }
+    });
+
+    // Forward browser resizes (delivered by the relay) into the coordinator.
+    let (browser_tx, mut browser_rx) = mpsc::unbounded_channel::<(u16, u16)>();
+    tokio::spawn(async move {
+        while let Some((rows, cols)) = browser_rx.recv().await {
+            let _ = size_tx.send(SizeUpdate::Browser(rows, cols));
+        }
+    });
+
+    Some(browser_tx)
+}
 
 struct RawModeGuard {
     orig: termios::Termios,
@@ -44,22 +117,6 @@ impl Drop for StderrRedirect {
     }
 }
 
-fn get_terminal_size() -> Winsize {
-    let fd = std::io::stdin().as_raw_fd();
-    unsafe {
-        let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) == 0 {
-            return Winsize {
-                ws_row: ws.ws_row,
-                ws_col: ws.ws_col,
-                ws_xpixel: ws.ws_xpixel,
-                ws_ypixel: ws.ws_ypixel,
-            };
-        }
-    }
-    Winsize { ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0 }
-}
-
 /// Attach to a running Docker container and bridge its stdin/stdout to both
 /// the local terminal (interactive) and the relay (for web dashboard access).
 ///
@@ -71,11 +128,8 @@ pub async fn bridge_container(
     relay_url: String,
     relay_token: String,
 ) -> Result<()> {
-    let ws = if std::io::stdin().is_terminal() {
-        get_terminal_size()
-    } else {
-        Winsize { ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0 }
-    };
+    let (rows, cols) = tty::host_terminal_size().unwrap_or((24, 80));
+    let ws = Winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
 
     let pty = openpty(&ws, None).context("openpty")?;
 
@@ -115,11 +169,16 @@ pub async fn bridge_container(
     let (overlay_tx, overlay_rx) = mpsc::unbounded_channel::<OverlayMessage>();
     let overlay_handle = tokio::spawn(overlay::run_overlay(overlay_rx));
 
+    // Terminal resize: local SIGWINCH + browser resizes → container TTY.
+    let browser_resize_tx = spawn_resize_propagation(container_name);
+
     // Background: relay connection + key exchange + encrypted bridge
     let relay_from_tx = to_container_tx.clone();
     let relay_handle = tokio::spawn(async move {
         let relay = RelayClient::new(relay_url, relay_token);
-        let _ = relay.connect_and_run(to_relay_rx, relay_from_tx, Some(overlay_tx)).await;
+        let _ = relay
+            .connect_and_run(to_relay_rx, relay_from_tx, Some(overlay_tx), browser_resize_tx)
+            .await;
     });
 
     // PTY master read → local terminal + relay (blocking thread — PTY fds aren't async-friendly)
