@@ -224,11 +224,16 @@ fn format_compose_yaml(
         yaml.push_str(&format!("    command: {cmd_json}\n"));
     }
 
-    // Top-level volumes declaration (required for named volumes)
+    // Top-level volumes declaration. Pin explicit names so compose does NOT prefix
+    // them with the (per-instance, randomized) project name — otherwise every start
+    // gets a fresh empty volume and the agent home (CLI logins, installed tools,
+    // downloaded browsers) never persists across restarts.
     yaml.push_str("\nvolumes:\n");
     yaml.push_str("  sandseal-agent-home:\n");
+    yaml.push_str("    name: sandseal-sandbox-agent-home\n");
     yaml.push_str("    external: false\n");
     yaml.push_str("  sandseal-apt-cache:\n");
+    yaml.push_str("    name: sandseal-sandbox-apt-cache\n");
     yaml.push_str("    external: false\n");
 
     yaml
