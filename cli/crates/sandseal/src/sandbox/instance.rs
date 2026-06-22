@@ -4,12 +4,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
 
-use crate::cli::{DestroyArgs, StartArgs};
+use crate::cli::{BuildArgs, DestroyArgs, StartArgs};
 use crate::config::merge::deep_merge;
 use crate::config::validate::validate_settings;
-use crate::docker::{build, compose, runtime};
+use crate::config::Settings;
+use crate::docker::{build, compose, image, runtime};
 use crate::sandbox::cleanup::{register_signal_handler, CleanupGuard};
 use crate::sandbox::hooks;
+
+/// The agent CLI baked into the sandbox image. Only Claude Code is supported today.
+const AGENT: &str = "claude";
 
 /// Resolve the project directory to an absolute canonical path.
 fn resolve_project_dir(path: &Path) -> Result<PathBuf> {
@@ -23,13 +27,84 @@ fn create_project_name(project_dir: &Path) -> String {
     let mut hasher = Sha1::new();
     hasher.update(dir_str.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
-    let basename = project_dir
+    format!("{}-{}", sanitize_basename(project_dir), &hash[..8])
+}
+
+/// Docker-safe lowercase basename of the project directory.
+fn sanitize_basename(project_dir: &Path) -> String {
+    project_dir
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .to_lowercase()
-        .replace(|c: char| !c.is_alphanumeric() && c != '-', "-");
-    format!("{}-{}", basename, &hash[..8])
+        .replace(|c: char| !c.is_alphanumeric() && c != '-', "-")
+}
+
+/// Load and deep-merge global + project settings.
+fn load_merged_settings(project_dir: &Path, home: &Path) -> Result<Settings> {
+    let global = home.join(".sandseal/settings.json");
+    let project = project_dir.join(".sandseal/settings.json");
+    let mut merged = serde_json::json!({});
+
+    for path in [&global, &project] {
+        if path.exists() {
+            let validated = validate_settings(path)?;
+            merged = deep_merge(&merged, &validated);
+            debug!("merged settings from {}", path.display());
+        }
+    }
+
+    serde_json::from_value(merged).context("failed to deserialize merged settings")
+}
+
+/// Resolve the setup hook script to an existing host path, if configured.
+fn resolve_setup_script(settings: &Settings, project_dir: &Path) -> Option<PathBuf> {
+    settings.hooks.as_ref()
+        .and_then(|h| h.setup.as_ref())
+        .and_then(|s| s.script.as_ref())
+        .map(|s| crate::path::resolve::resolve_host_path(s, project_dir))
+        .filter(|p| {
+            if p.exists() {
+                true
+            } else {
+                tracing::warn!("setup script not found: {}", p.display());
+                false
+            }
+        })
+}
+
+fn resolve_base_image(settings: &Settings) -> String {
+    settings.container.as_ref()
+        .and_then(|c| c.base_image.clone())
+        .unwrap_or_else(|| "ubuntu:24.04".to_string())
+}
+
+/// Build the image spec shared by `start` and `build`.
+fn image_spec<'a>(
+    project_basename: &'a str,
+    base_image: &'a str,
+    dependencies: &'a [String],
+    setup_script: Option<&'a Path>,
+    script_dir: &'a Path,
+    uid: u32,
+    gid: u32,
+    username: &'a str,
+    home: &'a str,
+    rebuild: bool,
+) -> image::ImageSpec<'a> {
+    image::ImageSpec {
+        agent: AGENT,
+        project_basename,
+        base_image,
+        uid,
+        gid,
+        username,
+        home,
+        dependencies,
+        setup_script,
+        script_dir,
+        rebuild,
+    }
 }
 
 fn generate_instance_id() -> String {
@@ -112,6 +187,7 @@ pub fn start_remote(args: &StartArgs) -> Result<StartedSandbox> {
 fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     let project_dir = resolve_project_dir(&args.path)?;
     let project_name = create_project_name(&project_dir);
+    let project_basename = sanitize_basename(&project_dir);
     let instance_id = generate_instance_id();
     let instance_name = format!("sandseal-sandbox-{project_name}-{instance_id}");
     let script_dir = find_script_dir()?;
@@ -119,28 +195,16 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     info!("starting sandbox for {}", project_dir.display());
     debug!("project_name={project_name} instance_name={instance_name}");
 
-    // Create tmp dir
     let home = dirs::home_dir().context("cannot determine home directory")?;
+
+    // Create tmp dir (holds the compose override + mounted prestart scripts)
     let tmp_base = home.join(".sandseal/tmp");
     std::fs::create_dir_all(&tmp_base)?;
     let tmp_dir = tempfile::tempdir_in(&tmp_base)?;
     let tmp_path = tmp_dir.keep();
 
     // Load and merge settings
-    let global_settings_path = home.join(".sandseal/settings.json");
-    let project_settings_path = project_dir.join(".sandseal/settings.json");
-    let mut merged = serde_json::json!({});
-
-    for path in [&global_settings_path, &project_settings_path] {
-        if path.exists() {
-            let validated = validate_settings(path)?;
-            merged = deep_merge(&merged, &validated);
-            debug!("merged settings from {}", path.display());
-        }
-    }
-
-    let settings: crate::config::Settings = serde_json::from_value(merged.clone())
-        .context("failed to deserialize merged settings")?;
+    let settings = load_merged_settings(&project_dir, &home)?;
 
     // Run setupHost hooks
     if let Some(hooks_cfg) = &settings.hooks {
@@ -149,11 +213,8 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         }
     }
 
-    // Resolve hooks for build context
-    let setup_script = settings.hooks.as_ref()
-        .and_then(|h| h.setup.as_ref())
-        .and_then(|s| s.script.as_ref())
-        .map(|s| crate::path::resolve::resolve_host_path(s, &project_dir));
+    // Resolve hooks
+    let setup_script = resolve_setup_script(&settings, &project_dir);
 
     let prestart_scripts: Vec<(usize, PathBuf)> = settings.hooks.as_ref()
         .and_then(|h| h.prestart.as_ref())
@@ -170,11 +231,9 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         })
         .unwrap_or_default();
 
-    // Assemble build context
-    build::assemble_build_context(
-        &script_dir,
+    // Copy prestart scripts into the instance tmp dir (mounted into the container)
+    build::copy_prestart_scripts(
         &tmp_path,
-        setup_script.as_deref(),
         &prestart_scripts.iter().map(|(i, p)| (*i, p.as_path())).collect::<Vec<_>>(),
     )?;
 
@@ -184,17 +243,30 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     let username = std::env::var("USER").unwrap_or_else(|_| "agent".to_string());
     let sandbox_home = home.to_string_lossy().to_string();
 
+    // Build (or reuse) the sandbox image — shared base + optional per-project overlay
+    let dependencies = settings.dependencies.clone().unwrap_or_default();
+    let base_image = resolve_base_image(&settings);
+    let image = image::ensure_images(&image_spec(
+        &project_basename,
+        &base_image,
+        &dependencies,
+        setup_script.as_deref(),
+        &script_dir,
+        uid,
+        gid,
+        &username,
+        &sandbox_home,
+        args.rebuild,
+    ))?;
+
     // Generate compose override
     let compose_ctx = compose::ComposeContext {
         project_dir: &project_dir,
         project_name: &project_name,
         instance_name: &instance_name,
-        sandbox_uid: uid,
-        sandbox_gid: gid,
-        sandbox_username: &username,
+        image: &image,
         sandbox_home: &sandbox_home,
         debug: std::env::var("SANDSEAL_DEBUG").is_ok(),
-        rebuild: args.rebuild,
         agent_args: &args.agent_args,
         settings: &settings,
         tmp_dir: &tmp_path,
@@ -224,29 +296,11 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
 
     register_signal_handler(Arc::clone(&guard));
 
-    // Compose env vars (needed by base docker-compose.yml template)
-    let cachebust = if args.rebuild {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .to_string()
-    } else {
-        "1".to_string()
-    };
-
+    // Compose up (images already built by the image module)
     let compose_env = runtime::ComposeEnv {
-        project_name: project_name.clone(),
         project_dir: project_dir.to_string_lossy().to_string(),
-        sandbox_uid: uid.to_string(),
-        sandbox_gid: gid.to_string(),
-        sandbox_username: username.clone(),
-        sandbox_home: sandbox_home.clone(),
-        cachebust,
     };
-
-    // Compose up
-    runtime::compose_up(&compose_cmd, args.rebuild, &compose_env)?;
+    runtime::compose_up(&compose_cmd, &compose_env)?;
 
     let container_name = runtime::get_container_name(&instance_name)?;
 
@@ -256,6 +310,42 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         project_dir,
         guard,
     })
+}
+
+/// Build (or rebuild) the sandbox image for a project without starting a container.
+pub fn build(args: BuildArgs) -> Result<()> {
+    let project_dir = resolve_project_dir(&args.path)?;
+    let project_basename = sanitize_basename(&project_dir);
+    let script_dir = find_script_dir()?;
+    let home = dirs::home_dir().context("cannot determine home directory")?;
+
+    let settings = load_merged_settings(&project_dir, &home)?;
+
+    let uid = nix::unistd::getuid().as_raw();
+    let gid = nix::unistd::getgid().as_raw();
+    let username = std::env::var("USER").unwrap_or_else(|_| "agent".to_string());
+    let sandbox_home = home.to_string_lossy().to_string();
+
+    let dependencies = settings.dependencies.clone().unwrap_or_default();
+    let base_image = resolve_base_image(&settings);
+    let setup_script = resolve_setup_script(&settings, &project_dir);
+
+    info!("building sandbox image for {}", project_dir.display());
+    let image = image::ensure_images(&image_spec(
+        &project_basename,
+        &base_image,
+        &dependencies,
+        setup_script.as_deref(),
+        &script_dir,
+        uid,
+        gid,
+        &username,
+        &sandbox_home,
+        true,
+    ))?;
+
+    println!("  Built image: {image}");
+    Ok(())
 }
 
 fn suggest_runtime_packages(project_dir: &Path, settings: &crate::config::Settings) {
@@ -331,11 +421,8 @@ pub fn destroy(args: DestroyArgs) -> Result<()> {
             .output();
     }
 
-    // Remove cached image
-    let image_name = format!("sandseal-sandbox/agent-{project_name}:latest");
-    let _ = std::process::Command::new("docker")
-        .args(["rmi", &image_name])
-        .output();
+    // Remove the project's overlay images (the shared base is left intact for other projects)
+    image::remove_project_overlays(AGENT, &sanitize_basename(&project_dir));
 
     info!("sandbox destroyed");
     Ok(())

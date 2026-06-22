@@ -13,11 +13,12 @@ ARG AGENT_HOME=/home/agent
 # removes default ubuntu user whose id we need for the agent user
 RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
 
-# The rest of the steps CANNOT be cached, we need to rerun the setup script everytime (there may be changes), and download
-# the latest package versions everytime.
-ARG CACHEBUST=1
+# Project-agnostic base image. Shared across all projects with identical inputs
+# (base image, user, agent installs). Project-specific dependencies and the setup
+# hook live in Dockerfile.overlay, built FROM this image.
 
-# Dependencies installaction
+# Latest package versions / agent releases are pulled fresh whenever CACHEBUST changes.
+ARG CACHEBUST=1
 
 ## Base dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,13 +32,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     sudo \
     && rm -rf /var/lib/apt/lists/*
-
-## User-defined dependencies
-ARG EXTRA_PACKAGES=""
-RUN if [ -n "$EXTRA_PACKAGES" ]; then \
-      apt-get update && apt-get install -y --no-install-recommends $EXTRA_PACKAGES \
-      && rm -rf /var/lib/apt/lists/*; \
-    fi
 
 ## Docker CLI
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
@@ -63,6 +57,9 @@ RUN groupadd -g "${GID}" "${AGENT_USERNAME}" \
     && echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME} \
     && (getent group docker || groupadd docker) && usermod -aG docker "${AGENT_USERNAME}"
 
+# Persist the agent username so the overlay image can restore it after its root steps
+ENV SANDSEAL_USER=${AGENT_USERNAME}
+
 # Prepare Agent CLI installations (user phase — user-space tools)
 RUN for agent_dir in /tmp/agent-installs/*/; do \
       agent=$(basename "${agent_dir}"); \
@@ -71,13 +68,6 @@ RUN for agent_dir in /tmp/agent-installs/*/; do \
         chmod +x "/tmp/agent-installs/${agent}/install-user.sh"; \
       fi; \
     done
-
-## Setup hook script (runs as root — can install system packages, configure locales, etc.)
-COPY setup-scripts/ /tmp/setup-scripts/
-RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
-      chmod +x /tmp/setup-scripts/setup.sh && \
-      /tmp/setup-scripts/setup.sh; \
-    fi
 
 USER ${AGENT_USERNAME}
 
@@ -101,7 +91,6 @@ USER root
 
 # Cleanup install scripts
 RUN rm -rf /tmp/agent-installs
-RUN rm -rf /tmp/setup-scripts
 
 # apt-get wrapper (logs runtime-installed packages for auto-suggest)
 COPY apt-wrapper.sh /usr/local/bin/apt-get

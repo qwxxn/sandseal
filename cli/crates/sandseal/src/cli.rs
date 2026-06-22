@@ -22,6 +22,8 @@ pub struct Cli {
 pub enum Command {
     /// Start a sandbox for the given project directory
     Start(StartArgs),
+    /// Build (or rebuild) the sandbox image without starting a container
+    Build(BuildArgs),
     /// Destroy sandbox(es) for a project
     Destroy(DestroyArgs),
     /// Show running sandbox instances
@@ -61,6 +63,13 @@ pub struct StartArgs {
     /// Arguments passed through to the agent CLI (after --)
     #[arg(last = true)]
     pub agent_args: Vec<String>,
+}
+
+#[derive(Parser)]
+pub struct BuildArgs {
+    /// Project directory (defaults to current directory)
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
 }
 
 #[derive(Parser)]

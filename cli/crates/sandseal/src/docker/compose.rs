@@ -11,12 +11,9 @@ pub struct ComposeContext<'a> {
     pub project_dir: &'a Path,
     pub project_name: &'a str,
     pub instance_name: &'a str,
-    pub sandbox_uid: u32,
-    pub sandbox_gid: u32,
-    pub sandbox_username: &'a str,
+    pub image: &'a str,
     pub sandbox_home: &'a str,
     pub debug: bool,
-    pub rebuild: bool,
     pub agent_args: &'a [String],
     pub settings: &'a Settings,
     pub tmp_dir: &'a Path,
@@ -104,33 +101,6 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         }
     }
 
-    // Build args
-    let mut build_args = HashMap::new();
-    build_args.insert("AGENT_USERNAME", ctx.sandbox_username.to_string());
-    build_args.insert("AGENT_HOME", ctx.sandbox_home.to_string());
-    build_args.insert("UID", ctx.sandbox_uid.to_string());
-    build_args.insert("GID", ctx.sandbox_gid.to_string());
-
-    if let Some(deps) = &ctx.settings.dependencies {
-        if !deps.is_empty() {
-            build_args.insert("EXTRA_PACKAGES", deps.join(" "));
-        }
-    }
-
-    if let Some(container) = &ctx.settings.container {
-        if let Some(base) = &container.base_image {
-            build_args.insert("BASE_IMAGE", base.clone());
-        }
-    }
-
-    if ctx.rebuild {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        build_args.insert("CACHEBUST", timestamp.to_string());
-    }
-
     // Labels
     let mut labels = HashMap::new();
     labels.insert("sandseal.project_name", ctx.project_name.to_string());
@@ -170,7 +140,6 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         ctx,
         &volumes,
         &environment,
-        &build_args,
         &labels,
         &command,
         host_network,
@@ -192,7 +161,6 @@ fn format_compose_yaml(
     ctx: &ComposeContext,
     volumes: &[String],
     environment: &HashMap<String, String>,
-    build_args: &HashMap<&str, String>,
     labels: &HashMap<&str, String>,
     command: &[String],
     host_network: bool,
@@ -200,24 +168,8 @@ fn format_compose_yaml(
 ) -> String {
     let mut yaml = String::from("services:\n  agent:\n");
 
-    // Image
-    yaml.push_str(&format!(
-        "    image: sandseal-sandbox/agent-{}:latest\n",
-        ctx.project_name
-    ));
-
-    // Build (context = tmp_dir so COPY finds agent-installs/, entrypoint.sh etc.)
-    yaml.push_str(&format!(
-        "    build:\n      context: \"{}\"\n      dockerfile: \"{}/agents/Dockerfile\"\n",
-        ctx.tmp_dir.display(),
-        ctx.script_dir.display(),
-    ));
-    if !build_args.is_empty() {
-        yaml.push_str("      args:\n");
-        for (key, val) in build_args {
-            yaml.push_str(&format!("        {key}: \"{val}\"\n"));
-        }
-    }
+    // Image (prebuilt by the image module — compose only runs it)
+    yaml.push_str(&format!("    image: {}\n", ctx.image));
 
     // Network mode
     if host_network {

@@ -9,13 +9,7 @@ use crate::docker::tty;
 
 /// Environment variables needed by the base docker-compose.yml template.
 pub struct ComposeEnv {
-    pub project_name: String,
     pub project_dir: String,
-    pub sandbox_uid: String,
-    pub sandbox_gid: String,
-    pub sandbox_username: String,
-    pub sandbox_home: String,
-    pub cachebust: String,
 }
 
 /// Build the base docker compose command with project name and compose files.
@@ -38,14 +32,11 @@ pub fn compose_cmd(
     ]
 }
 
-/// Run `docker compose up -d [--build] agent`
-pub fn compose_up(cmd: &[String], rebuild: bool, env: &ComposeEnv) -> Result<()> {
+/// Run `docker compose up -d agent` (images are prebuilt by the image module).
+pub fn compose_up(cmd: &[String], env: &ComposeEnv) -> Result<()> {
     let mut args: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
     args.push("up");
     args.push("-d");
-    if rebuild {
-        args.push("--build");
-    }
     args.push("agent");
 
     debug!("running: {}", args.join(" "));
@@ -53,13 +44,7 @@ pub fn compose_up(cmd: &[String], rebuild: bool, env: &ComposeEnv) -> Result<()>
     let mut command = Command::new(&args[0]);
     command
         .args(&args[1..])
-        .env("PROJECT_NAME", &env.project_name)
         .env("PROJECT_DIR", &env.project_dir)
-        .env("SANDBOX_UID", &env.sandbox_uid)
-        .env("SANDBOX_GID", &env.sandbox_gid)
-        .env("SANDBOX_USERNAME", &env.sandbox_username)
-        .env("SANDBOX_HOME", &env.sandbox_home)
-        .env("CACHEBUST", &env.cachebust)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());

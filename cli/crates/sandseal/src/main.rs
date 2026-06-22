@@ -27,6 +27,7 @@ async fn main() -> Result<()> {
                 instance::start(args).await?;
             }
         }
+        Command::Build(args) => instance::build(args)?,
         Command::Destroy(args) => instance::destroy(args)?,
         Command::Status => instance::status()?,
         Command::Login(args) => {

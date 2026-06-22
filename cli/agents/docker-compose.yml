@@ -1,15 +1,6 @@
 services:
   agent:
-    build:
-      context: .
-      dockerfile: agents/Dockerfile
-      args:
-        UID: "${SANDBOX_UID:-1000}"
-        GID: "${SANDBOX_GID:-1000}"
-        AGENT_USERNAME: "${SANDBOX_USERNAME:-agent}"
-        AGENT_HOME: "${SANDBOX_HOME:-/home/agent}"
-        CACHEBUST: "${CACHEBUST:-1}"
-    image: sandseal-sandbox/agent-${PROJECT_NAME}:latest
+    # image is set by the generated override; built ahead of time by the CLI
     pull_policy: never # the agent image is built locally
     stdin_open: true
     tty: true
