@@ -4,3 +4,4 @@ dist/
 .env.local
 .pnpm-store/
 .backup-notes-*.json
+.rewrite-review.md
