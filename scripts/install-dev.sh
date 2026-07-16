@@ -44,6 +44,16 @@ main() {
         info "Schema → ${DATA_DIR}/schema/"
     fi
 
+    # Duo hook (druhý názor od Fable 5) do user scope. Opt-out: SANDSEAL_SKIP_DUO=1.
+    # Nesouvisí se sandseal runtime — je to dev pohodlí, takže selhání se jen zaloguje.
+    if [[ "${SANDSEAL_SKIP_DUO:-0}" != "1" && -x "${REPO_ROOT}/scripts/duo/install.sh" ]]; then
+        if "${REPO_ROOT}/scripts/duo/install.sh" >/dev/null 2>&1; then
+            info "Duo hook → ${HOME}/.claude/hooks/duo.sh"
+        else
+            info "Duo hook přeskočen (chybí jq?) — spusť scripts/duo/install.sh ručně"
+        fi
+    fi
+
     info ""
     info "Done. Version: $(${INSTALL_DIR}/sandseal --version 2>/dev/null || echo 'unknown')"
 
