@@ -1,6 +1,6 @@
 # Shared Memory
 
-Shared persistent memory layer for two users. Stores notes with vector embeddings (Ollama / nomic-embed-text), enables semantic search, and exposes an MCP server for direct integration with Claude Code and claude.ai.
+Shared persistent memory layer for two users. Stores notes with vector embeddings (Ollama / bge-m3), enables semantic search, and exposes an MCP server for direct integration with Claude Code and claude.ai.
 
 ## Architecture
 
@@ -26,9 +26,9 @@ Shared persistent memory layer for two users. Stores notes with vector embedding
 | Layer | Tech |
 |-------|------|
 | API | Hono + TypeScript |
-| Vectors | Qdrant (cosine, 768d) |
+| Vectors | Qdrant (cosine, 1024d) |
 | Metadata & relations | PostgreSQL 16 |
-| Embeddings | Ollama + nomic-embed-text |
+| Embeddings | Ollama + bge-m3 |
 | MCP server | @modelcontextprotocol/sdk + Express |
 | Frontend | Next.js 15 + Tailwind + react-force-graph |
 | Orchestration | Docker Compose |
@@ -257,7 +257,7 @@ Three tables: `users`, `notes`, `note_links`. See `infra/postgres/init.sql` for 
 | `pnpm build:all` | Build all packages |
 | `pnpm docker:dev:up` | Start dev containers |
 | `pnpm docker:dev:down` | Stop dev containers |
-| `pnpm docker:dev:pull-model` | Pull nomic-embed-text into dev Ollama |
+| `pnpm docker:dev:pull-model` | Pull bge-m3 into dev Ollama |
 | `pnpm docker:prod:up` | Build & start production stack |
 | `pnpm docker:prod:down` | Stop production stack |
 | `pnpm docker:prod:pull-model` | Pull model into prod Ollama |
