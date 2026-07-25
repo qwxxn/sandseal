@@ -5,3 +5,4 @@ dist/
 .pnpm-store/
 .backup-notes-*.json
 .rewrite-review.md
+backups/
