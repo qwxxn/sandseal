@@ -28,6 +28,7 @@ This builds a sandbox image, mounts your project, and drops you into an isolated
 - **Workspace mounts** — give the agent read-only (or read-write) access to other directories
 - **Service endpoints** — map hostnames to host IPs for database access etc.
 - **Docker passthrough** — optionally mount the Docker socket for agents that need it
+- **Configuration profiles** — named settings presets (`night`, `review`, `untrusted`) switched per project with `sandseal config set`
 - **Persistent agent home** — packages installed by the agent survive restarts
 - **Debug mode** — drop into a bash shell instead of the agent CLI with `-d`
 - **Concurrent instances** — run multiple sandboxes for the same project
@@ -42,7 +43,7 @@ Create `.sandseal/settings.json` in your project (or `~/.sandseal/settings.json`
   "files": {
     "exclude": [".env", ".env.*", "secrets/"],
     "include": {
-      "/home/me/.ssh/config": "/home/agent/.ssh/config"
+      "/home/user/.ssh/config": "/home/agent/.ssh/config"
     }
   },
   "dependencies": ["postgresql-client", "redis-tools"],
@@ -63,15 +64,92 @@ Create `.sandseal/settings.json` in your project (or `~/.sandseal/settings.json`
 
 Full schema: [`schema/settings.schema.json`](schema/settings.schema.json)
 
+## Profiles
+
+A profile is a named settings file in `~/.sandseal/profiles/<name>.json`, using the same
+schema as `settings.json`. It slots between the global and project layers, so you can
+switch a whole set of restrictions on and off per project instead of editing one config.
+
+```bash
+sandseal config create night                # ~/.sandseal/profiles/night.json
+sandseal config edit night                  # open in $EDITOR, validated on save
+sandseal config set night                   # activate for this project
+sandseal config list                        # available profiles, active one marked *
+sandseal config effective                   # merged settings actually used
+```
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/sandseal/sandseal/main/schema/settings.schema.json",
+  "description": "unattended runs: no prod secrets, no host network, no docker socket",
+  "$replace": ["environment", "files.include"],
+  "environment": {},
+  "files": { "exclude": [".env.production", "secrets/"] },
+  "network": { "mode": "bridge" },
+  "docker": { "passthrough": false }
+}
+```
+
+### Layering
+
+Layers are deep-merged, lowest precedence first:
+
+```
+~/.sandseal/settings.json  ->  <project>/.sandseal/settings.json  ->  profile
+```
+
+Global carries the machine-wide defaults, the project adds its own specifics, and the
+profile lands on top — so a project cannot re-open what a profile closed.
+
+| Value type | Merge behaviour |
+|---|---|
+| Scalar (`network.mode`) | Higher layer wins |
+| Array (`files.exclude`) | Concatenated and deduplicated — exclusions only ever grow |
+| Object (`environment`) | Merged key by key; a higher layer adds or overwrites keys |
+
+### Removing inherited values
+
+Merging alone can only add or overwrite keys, never remove one — so an empty
+`"environment": {}` in a profile would leave the global secrets untouched. Declare the
+paths a layer replaces wholesale:
+
+```json
+"$replace": ["environment", "files.include"]
+```
+
+Those paths are dropped from the lower layers before the merge, so the layer's own value
+wins whole. Paths are dot-separated and address schema keys; to drop a single map entry,
+replace the whole map. Any layer may use it, not just profiles. Leave `files.exclude` out
+of `$replace` — a profile should only ever hide more, never less.
+
+The active profile is stored in `<project>/.sandseal/state.json` (add it to `.gitignore` —
+it is machine-local). `sandseal config set --global` sets a machine-wide fallback used by
+projects that have not picked one. A missing profile is a hard error, never a silent skip.
+
+```
+sandseal config list                      List profiles, mark the active one
+sandseal config set <name>                Activate a profile for this project
+sandseal config set <name> --global       Activate machine-wide (fallback)
+sandseal config unset                     Clear the active profile
+sandseal config show [name]               Print a profile (default: active)
+sandseal config create <name> [--from x]  Create a profile, optionally by copying
+sandseal config edit [name]               Open in $EDITOR and validate
+sandseal config delete <name>             Delete a profile
+sandseal config effective                 Print the merged settings
+```
+
 ## CLI usage
 
 ```
-sandseal start [path]      Start a sandbox (default: current directory)
-sandseal start -d [path]   Start in debug mode (bash shell)
-sandseal start --rebuild   Force rebuild the Docker image
-sandseal destroy [path]    Destroy sandbox for a project
-sandseal destroy --all     Destroy all sandboxes
-sandseal status            Show running sandboxes
+sandseal start [path]        Start a sandbox (default: current directory)
+sandseal start -d [path]     Start in debug mode (bash shell)
+sandseal start --rebuild     Force rebuild the Docker image
+sandseal start --profile x   Use profile x instead of the active one
+sandseal start --no-profile  Ignore the active profile for this run
+sandseal destroy [path]      Destroy sandbox for a project
+sandseal destroy --all       Destroy all sandboxes
+sandseal status              Show running sandboxes
+sandseal config <cmd>        Manage configuration profiles (see above)
 ```
 
 ## How it works
