@@ -118,9 +118,15 @@ paths a layer replaces wholesale:
 ```
 
 Those paths are dropped from the lower layers before the merge, so the layer's own value
-wins whole. Paths are dot-separated and address schema keys; to drop a single map entry,
-replace the whole map. Any layer may use it, not just profiles. Leave `files.exclude` out
-of `$replace` — a profile should only ever hide more, never less.
+wins whole. Any layer may use it, not just profiles. Leave `files.exclude` out of
+`$replace` — a profile should only ever hide more, never less.
+
+Paths are dot-separated settings keys, **one per array item** — `["environment",
+"files.include"]`, not `["environment, files.include"]`. Every entry is checked against
+the schema and an unknown path is a hard error: a path that resolves to nothing would
+silently disable the directive and leave the inherited values in place. A single key
+inside a free-form map works (`environment.API_TOKEN`), but map keys that themselves
+contain dots (the paths under `files.include`) are not addressable — replace the whole map.
 
 The active profile is stored in `<project>/.sandseal/state.json` (add it to `.gitignore` —
 it is machine-local). `sandseal config set --global` sets a machine-wide fallback used by
