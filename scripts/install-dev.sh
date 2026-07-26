@@ -10,10 +10,10 @@ error() { printf '\033[0;31mError: %s\033[0m\n' "$1" >&2; exit 1; }
 
 main() {
     info "Building sandseal (release)..."
-    cd "${REPO_ROOT}/cli"
+    cd "${REPO_ROOT}/apps/cli"
     cargo build --release
 
-    local binary="${REPO_ROOT}/cli/target/release/sandseal"
+    local binary="${REPO_ROOT}/apps/cli/target/release/sandseal"
     if [[ ! -f "${binary}" ]]; then
         error "build failed — binary not found at ${binary}"
     fi
@@ -32,15 +32,15 @@ main() {
 
     # Install agents
     mkdir -p "${DATA_DIR}/agents"
-    cp -r "${REPO_ROOT}/cli/agents/." "${DATA_DIR}/agents/"
+    cp -r "${REPO_ROOT}/apps/cli/agents/." "${DATA_DIR}/agents/"
     chmod +x "${DATA_DIR}/agents/entrypoint.sh" 2>/dev/null || true
     chmod +x "${DATA_DIR}/agents/apt-wrapper.sh" 2>/dev/null || true
     info "Agents → ${DATA_DIR}/agents/"
 
     # Install schema
-    if [[ -d "${REPO_ROOT}/cli/schema" ]]; then
+    if [[ -d "${REPO_ROOT}/apps/cli/schema" ]]; then
         mkdir -p "${DATA_DIR}/schema"
-        cp -r "${REPO_ROOT}/cli/schema/." "${DATA_DIR}/schema/"
+        cp -r "${REPO_ROOT}/apps/cli/schema/." "${DATA_DIR}/schema/"
         info "Schema → ${DATA_DIR}/schema/"
     fi
 

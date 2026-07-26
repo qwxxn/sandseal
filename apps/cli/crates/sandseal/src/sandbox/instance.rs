@@ -120,17 +120,23 @@ fn find_script_dir() -> Result<PathBuf> {
 
     let home_dir = dirs::home_dir().unwrap_or_default();
 
+    // Order matters: paths next to the BINARY come before ~/.sandseal. A freshly built
+    // debug binary must use the repo's assets, not whatever an older `install-dev.sh` left
+    // in ~/.sandseal — otherwise a changed entrypoint.sh or a new skill is silently ignored
+    // and the sandbox runs stale assets while the CLI reports success.
     for candidate in &[
-        home_dir.join(".sandseal"),           // installed: ~/.sandseal/agents/
-        exe_dir.join("../.."),                // cargo run: target/debug -> cli/ (holds agents/)
-        exe_dir.to_path_buf(),               // installed: same dir as binary
+        exe_dir.join("../.."),                // cargo build: target/debug -> apps/cli (holds agents/)
+        exe_dir.to_path_buf(),                // installed: same dir as binary
         exe_dir.join(".."),                   // installed: parent of binary
+        home_dir.join(".sandseal"),           // installed: ~/.sandseal/agents/
         PathBuf::from("."),                   // current dir
     ] {
         let agents = candidate.join("agents");
         if agents.is_dir() {
-            return std::fs::canonicalize(candidate)
-                .context("failed to canonicalize script dir");
+            let resolved = std::fs::canonicalize(candidate)
+                .context("failed to canonicalize script dir")?;
+            debug!("using sandbox assets from {}", resolved.display());
+            return Ok(resolved);
         }
     }
 
