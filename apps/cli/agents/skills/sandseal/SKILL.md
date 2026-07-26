@@ -156,15 +156,26 @@ Reach for `memoryLimit` when a build dies with an out-of-memory or a bare "kille
 
 ### `hooks` — scripts around the lifecycle
 
+**Every `script` is a PATH to a script file, never a shell command.** An inline command is
+taken as a filename, the hook is skipped with a warning, and nothing runs — a mistake that
+looks like the hook working until you check. Relative paths resolve against the project.
+
 ```json
 {
   "hooks": {
-    "setup": { "script": "pnpm install --frozen-lockfile" },
-    "prestart": [{ "script": "/workspace/scripts/wait-for-db.sh" }],
-    "setupHost": [{ "script": "docker compose -f dev.yaml up -d" }],
-    "cleanupHost": [{ "script": "docker compose -f dev.yaml down" }]
+    "setup": { "script": ".sandseal/hooks/setup.sh" },
+    "prestart": [{ "script": ".sandseal/hooks/wait-for-db.sh" }],
+    "setupHost": [{ "script": ".sandseal/hooks/start-services.sh" }],
+    "cleanupHost": [{ "script": ".sandseal/hooks/stop-services.sh" }]
   }
 }
+```
+
+So to run `pnpm install` at build time, write it into a file and point the hook at it:
+
+```bash
+printf '#!/usr/bin/env bash\nset -e\npnpm install --frozen-lockfile\n' > .sandseal/hooks/setup.sh
+chmod +x .sandseal/hooks/setup.sh
 ```
 
 | Hook | Runs | Where |

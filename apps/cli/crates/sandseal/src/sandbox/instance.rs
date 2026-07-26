@@ -62,7 +62,11 @@ fn resolve_setup_script(settings: &Settings, project_dir: &Path) -> Option<PathB
             if p.exists() {
                 true
             } else {
-                tracing::warn!("setup script not found: {}", p.display());
+                tracing::warn!(
+                    "setup hook skipped: script not found. \
+                     hooks.setup.script is a PATH to a script file, not a shell command."
+                );
+                tracing::debug!("setup hook resolved to {}", p.display());
                 false
             }
         })
@@ -237,7 +241,15 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
                 if path.exists() {
                     Some((i + 1, path))
                 } else {
-                    tracing::warn!("prestart script not found: {}", path.display());
+                    // Deliberately does not print the configured value: hooks routinely
+                    // contain credentials (a git config with a PAT, for one), and a warning
+                    // that echoes them puts a live token in the terminal and in any log.
+                    tracing::warn!(
+                        "prestart hook #{} skipped: script not found. \
+                         hooks.prestart[].script is a PATH to a script file, not a shell command.",
+                        i + 1
+                    );
+                    tracing::debug!("prestart hook #{} resolved to {}", i + 1, path.display());
                     None
                 }
             }).collect()
