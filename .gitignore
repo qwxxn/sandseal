@@ -6,4 +6,3 @@ dist/
 .backup-notes-*.json
 .rewrite-review.md
 backups/
-.dev-keys.json
