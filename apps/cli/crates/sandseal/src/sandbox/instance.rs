@@ -288,6 +288,8 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     // all mean "this sandbox has no memory", never a failed start.
     let memory = crate::memory::session::open(args.api_url.as_deref(), &project_dir, &instance_name).await;
     if memory.is_some() {
+        crate::memory::provision::render(&tmp_path)
+            .context("failed to render memory agent config")?;
         info!("memory enabled for this session");
     }
 
