@@ -1,0 +1,33 @@
+# Project-specific overlay built on top of a shared base image (Dockerfile.base).
+# Only built when a project defines extra dependencies or a setup hook.
+# BASE is always supplied via --build-arg by the CLI; the scratch default just
+# keeps buildkit from warning about a missing default.
+ARG BASE=scratch
+FROM ${BASE}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+USER root
+
+# Latest package versions are pulled fresh whenever CACHEBUST changes.
+ARG CACHEBUST=1
+
+## User-defined dependencies
+# Call the real apt-get directly (not the /usr/local/bin wrapper) so these
+# build-time installs are not logged as runtime packages.
+ARG EXTRA_PACKAGES=""
+RUN if [ -n "$EXTRA_PACKAGES" ]; then \
+      /usr/bin/apt-get update && /usr/bin/apt-get install -y --no-install-recommends $EXTRA_PACKAGES \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+## Setup hook script (runs as root — can install system packages, configure locales, etc.)
+COPY setup-scripts/ /tmp/setup-scripts/
+RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
+      chmod +x /tmp/setup-scripts/setup.sh && \
+      /tmp/setup-scripts/setup.sh; \
+    fi
+RUN rm -rf /tmp/setup-scripts
+
+# Restore the agent user (base switched to it; our root steps reset it)
+USER ${SANDSEAL_USER}
