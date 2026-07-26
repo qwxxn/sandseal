@@ -12,6 +12,5 @@ pub async fn run(args: MemoryArgs) -> Result<()> {
     match args.command {
         MemoryCommand::Recall(a) => recall::run(a.api_url.as_deref(), a.stdin).await,
         MemoryCommand::Mcp(a) => mcp::serve(a.api_url.as_deref()).await,
-        MemoryCommand::Provision => provision::run(None),
     }
 }
