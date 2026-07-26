@@ -15,7 +15,10 @@
     },
     "$replace": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "description": "Dot-separated keys this layer replaces wholesale instead of merging into the layers below (e.g. \"environment\", \"files.include\"). Without it a layer can only add or overwrite keys, never remove an inherited one."
     },
     "files": {
@@ -24,7 +27,10 @@
       "properties": {
         "exclude": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "include": {
           "type": "object",
@@ -40,7 +46,10 @@
     },
     "dependencies": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "container": {
       "type": "object",
@@ -70,9 +79,11 @@
           "properties": {
             "script": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Path to a script FILE on the host, run at image build time. Relative paths resolve against the project directory. This is not a shell command \u2014 an inline command is treated as a filename and the hook is skipped."
             }
-          }
+          },
+          "description": "Runs at image build time. Changing it requires a rebuild."
         },
         "prestart": {
           "type": "array",
@@ -82,11 +93,15 @@
             "properties": {
               "script": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Path to a script FILE on the host, copied into the container and run before the agent starts. Relative paths resolve against the project directory. Not a shell command."
               }
             },
-            "required": ["script"]
-          }
+            "required": [
+              "script"
+            ]
+          },
+          "description": "Scripts run inside the container before the agent starts, in order."
         },
         "setupHost": {
           "type": "array",
@@ -96,10 +111,13 @@
             "properties": {
               "script": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Path to a script FILE on the host, run on the host before the container starts. Not a shell command."
               }
             },
-            "required": ["script"]
+            "required": [
+              "script"
+            ]
           }
         },
         "cleanupHost": {
@@ -110,10 +128,13 @@
             "properties": {
               "script": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Path to a script FILE on the host, run on the host after the container stops. Not a shell command."
               }
             },
-            "required": ["script"]
+            "required": [
+              "script"
+            ]
           }
         }
       }
@@ -133,7 +154,9 @@
           "description": "Mount read-write instead of read-only (default: false)"
         }
       },
-      "required": ["dir"]
+      "required": [
+        "dir"
+      ]
     },
     "environment": {
       "type": "object",
@@ -150,9 +173,12 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["bridge", "host"],
+          "enum": [
+            "bridge",
+            "host"
+          ],
           "default": "bridge",
-          "description": "Network mode for the sandbox container. 'bridge' (default) isolates the container network. 'host' shares the host network namespace — use only when necessary."
+          "description": "Network mode for the sandbox container. 'bridge' (default) isolates the container network. 'host' shares the host network namespace \u2014 use only when necessary."
         },
         "services": {
           "type": "object",
