@@ -1,0 +1,10 @@
+services:
+  agent:
+    # image is set by the generated override; built ahead of time by the CLI
+    pull_policy: never # the agent image is built locally
+    stdin_open: true
+    tty: true
+    volumes:
+      # mount project at host absolute path
+      - ${PROJECT_DIR:-.}:${PROJECT_DIR:-.}
+    working_dir: ${PROJECT_DIR:-.}

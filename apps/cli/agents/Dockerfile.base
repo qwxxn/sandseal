@@ -1,0 +1,107 @@
+ARG BASE_IMAGE=ubuntu:24.04
+
+FROM ${BASE_IMAGE}
+
+# Use bash with pipefail so any failed command in a pipe aborts the build
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG UID=1000
+ARG GID=1000
+ARG AGENT_USERNAME=agent
+ARG AGENT_HOME=/home/agent
+
+# removes default ubuntu user whose id we need for the agent user
+RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
+
+# Project-agnostic base image. Shared across all projects with identical inputs
+# (base image, user, agent installs). Project-specific dependencies and the setup
+# hook live in Dockerfile.overlay, built FROM this image.
+
+# Latest package versions / agent releases are pulled fresh whenever CACHEBUST changes.
+ARG CACHEBUST=1
+
+## Base dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    jq \
+    nano \
+    vim \
+    ripgrep \
+    ca-certificates \
+    gnupg \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+## Docker CLI
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+      && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list \
+      && apt-get update \
+      && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+      && rm -rf /var/lib/apt/lists/*
+
+# Agent CLI installations (root phase — global packages)
+COPY agent-installs/ /tmp/agent-installs/
+RUN for agent_dir in /tmp/agent-installs/*/; do \
+      agent=$(basename "${agent_dir}"); \
+      if [ -f "/tmp/agent-installs/${agent}/install-root.sh" ]; then \
+        chmod +x "/tmp/agent-installs/${agent}/install-root.sh" \
+        && "/tmp/agent-installs/${agent}/install-root.sh"; \
+      fi; \
+    done
+
+# Create agent user
+# -l on useradd avoids a huge sparse /var/log/lastlog entry when host UID is very high
+RUN groupadd -g "${GID}" "${AGENT_USERNAME}" \
+    && useradd -l -u "${UID}" -g "${GID}" -m -d "${AGENT_HOME}" -s /bin/bash "${AGENT_USERNAME}" \
+    && echo "${AGENT_USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${AGENT_USERNAME} \
+    && (getent group docker || groupadd docker) && usermod -aG docker "${AGENT_USERNAME}"
+
+# Persist the agent username so the overlay image can restore it after its root steps
+ENV SANDSEAL_USER=${AGENT_USERNAME}
+
+# Prepare Agent CLI installations (user phase — user-space tools)
+RUN for agent_dir in /tmp/agent-installs/*/; do \
+      agent=$(basename "${agent_dir}"); \
+      if [ -f "/tmp/agent-installs/${agent}/install-user.sh" ]; then \
+        chown "${AGENT_USERNAME}" "/tmp/agent-installs/${agent}/install-user.sh" && \
+        chmod +x "/tmp/agent-installs/${agent}/install-user.sh"; \
+      fi; \
+    done
+
+USER ${AGENT_USERNAME}
+
+# Execute Agent CLI installations (user phase — user-space tools)
+ENV HOME=${AGENT_HOME}
+ENV LANG=C.UTF-8
+
+# support for non-interactive shells (agents run non-interactively), e.g. using NVM in non-interactive shells
+ENV BASH_ENV="${AGENT_HOME}/.bash_env"
+RUN touch "${AGENT_HOME}/.bash_env"
+RUN echo '[ -s "${BASH_ENV}" ] && . "${BASH_ENV}"' >> "${AGENT_HOME}/.bashrc"
+
+RUN for agent_dir in /tmp/agent-installs/*/; do \
+      agent=$(basename "${agent_dir}"); \
+      if [ -f "/tmp/agent-installs/${agent}/install-user.sh" ]; then \
+        "/tmp/agent-installs/${agent}/install-user.sh"; \
+      fi; \
+    done
+
+USER root
+
+# Cleanup install scripts
+RUN rm -rf /tmp/agent-installs
+
+# apt-get wrapper (logs runtime-installed packages for auto-suggest)
+COPY apt-wrapper.sh /usr/local/bin/apt-get
+RUN chmod +x /usr/local/bin/apt-get
+
+# Prepare entrypoint script
+COPY entrypoint.sh /tmp/entrypoint.sh
+RUN chmod +x /tmp/entrypoint.sh
+
+USER ${AGENT_USERNAME}
+
+ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
+
+ENTRYPOINT ["/tmp/entrypoint.sh"]

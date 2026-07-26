@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sandseal Settings",
+  "description": "Configuration for the Sandseal AI agent sandbox",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference for IDE autocompletion"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable label for this settings file, shown by `sandseal config list`"
+    },
+    "$replace": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Dot-separated keys this layer replaces wholesale instead of merging into the layers below (e.g. \"environment\", \"files.include\"). Without it a layer can only add or overwrite keys, never remove an inherited one."
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "include": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "memoryLimit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "memorySwapLimit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseImage": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "setup": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "script": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "prestart": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        },
+        "setupHost": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        },
+        "cleanupHost": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["script"]
+          }
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Directory mounted into the sandbox, giving the agent visibility into other projects",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Host directory path to mount"
+        },
+        "readwrite": {
+          "type": "boolean",
+          "description": "Mount read-write instead of read-only (default: false)"
+        }
+      },
+      "required": ["dir"]
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "minLength": 1
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["bridge", "host"],
+          "default": "bridge",
+          "description": "Network mode for the sandbox container. 'bridge' (default) isolates the container network. 'host' shares the host network namespace — use only when necessary."
+        },
+        "services": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "description": "Service endpoints accessible from the sandbox. Maps hostname to target (e.g. \"db.dev\": \"host-gateway:5432\"). Generates extra_hosts entries in docker-compose."
+        }
+      }
+    },
+    "docker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "passthrough": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mount Docker socket into the sandbox, giving the agent full Docker access. Disabled by default for security."
+        }
+      }
+    }
+  }
+}

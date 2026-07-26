@@ -178,13 +178,13 @@ cd cli
 cargo build --release
 ```
 
-The binary is at `cli/target/release/sandseal`.
+The binary is at `apps/cli/target/release/sandseal`.
 
 ## Project structure
 
 ```
 sandseal/
-├── cli/                  Rust CLI (cargo workspace)
+├── apps/cli/             Rust CLI (cargo workspace)
 │   ├── crates/
 │   │   ├── sandseal/     Main binary
 │   │   └── sandseal-protocol/  Shared types

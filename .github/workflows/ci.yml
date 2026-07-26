@@ -16,12 +16,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: cli
+          workspaces: apps/cli
       - name: Check
-        working-directory: cli
+        working-directory: apps/cli
         run: cargo check --workspace
       - name: Test
-        working-directory: cli
+        working-directory: apps/cli
         run: cargo test --workspace
 
   cli-release:
@@ -55,16 +55,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Build
-        working-directory: cli
+        working-directory: apps/cli
         run: cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       - name: Package
         run: |
           mkdir -p dist
-          cp cli/target/${{ matrix.target }}/release/sandseal dist/sandseal
-          cp -r cli/agents dist/agents
-          cp -r cli/schema dist/schema
+          cp apps/cli/target/${{ matrix.target }}/release/sandseal dist/sandseal
+          cp -r apps/cli/agents dist/agents
+          cp -r apps/cli/schema dist/schema
           cd dist && tar -czf ${{ matrix.artifact }}.tar.gz sandseal agents/ schema/
       - uses: actions/upload-artifact@v4
         with:
