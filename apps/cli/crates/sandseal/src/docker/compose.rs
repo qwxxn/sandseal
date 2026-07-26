@@ -71,15 +71,25 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         volumes.push("/var/run/docker.sock:/var/run/docker.sock".to_string());
     }
 
-    // Sandseal settings only (not auth.json or identity.key)
+    // Sandseal settings only (not auth.json or identity.key), READ-ONLY.
+    // The agent may need to read the machine-wide defaults to explain its own environment,
+    // but it must not rewrite them: a writable mount lets a sandboxed agent drop
+    // files.exclude or set docker.passthrough for every FUTURE session on this machine.
     let home = dirs::home_dir().unwrap_or_default();
     let settings_file = home.join(".sandseal/settings.json");
     if settings_file.is_file() {
         volumes.push(format!(
-            "{}:{}/.sandseal/settings.json",
+            "{}:{}/.sandseal/settings.json:ro",
             settings_file.display(),
             ctx.sandbox_home
         ));
+    }
+
+    // Bundled skills (read-only). The entrypoint copies them into the agent home so the
+    // agent can learn how to configure the sandbox it is running in.
+    let skills_dir = ctx.script_dir.join("agents/skills");
+    if skills_dir.is_dir() {
+        volumes.push(format!("{}:/opt/sandseal/skills:ro", skills_dir.display()));
     }
     // Prestart scripts
     let prestart_dir = ctx.tmp_dir.join("prestart-scripts");
@@ -237,4 +247,83 @@ fn format_compose_yaml(
     yaml.push_str("    external: false\n");
 
     yaml
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::schema::Settings;
+
+    /// generate_compose_override reads the agent command file, so every fixture needs it.
+    fn script_dir_with_agent() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("agents/claude")).unwrap();
+        std::fs::write(
+            dir.path().join("agents/claude/command.json"),
+            r#"["claude", "--dangerously-skip-permissions"]"#,
+        )
+        .unwrap();
+        dir
+    }
+
+    fn context<'a>(script_dir: &'a Path, project_dir: &'a Path, settings: &'a Settings) -> ComposeContext<'a> {
+        ComposeContext {
+            project_dir,
+            project_name: "demo",
+            instance_name: "agent",
+            image: "sandseal-sandbox/agent-claude:test",
+            sandbox_home: "/home/agent",
+            debug: false,
+            agent_args: &[],
+            settings,
+            tmp_dir: project_dir,
+            script_dir,
+        }
+    }
+
+    #[test]
+    fn bundled_skills_are_mounted_read_only_when_present() {
+        let script_dir = script_dir_with_agent();
+        std::fs::create_dir_all(script_dir.path().join("agents/skills/sandseal")).unwrap();
+        std::fs::write(script_dir.path().join("agents/skills/sandseal/SKILL.md"), "---\nname: sandseal\n---\n").unwrap();
+
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
+
+        assert!(
+            yaml.contains("/opt/sandseal/skills:ro"),
+            "skills must reach the container so the agent can learn to configure it:\n{yaml}"
+        );
+    }
+
+    #[test]
+    fn no_skills_mount_when_the_directory_is_absent() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
+
+        assert!(!yaml.contains("/opt/sandseal/skills"));
+    }
+
+    #[test]
+    fn the_machine_wide_settings_mount_is_read_only() {
+        // A writable mount would let a sandboxed agent drop files.exclude or enable
+        // docker.passthrough for every future session on this machine.
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
+
+        for line in yaml.lines() {
+            if line.contains("/.sandseal/settings.json") {
+                // The YAML entry is quoted, so match the suffix inside the quotes.
+                assert!(
+                    line.trim_end().trim_end_matches('"').ends_with(":ro"),
+                    "settings mount must be read-only: {line}"
+                );
+            }
+        }
+    }
 }
