@@ -19,6 +19,13 @@ if [[ -d /opt/sandseal/skills ]]; then
   cp -r /opt/sandseal/skills/. "${HOME}/.claude/skills/"
 fi
 
+# Register the memory MCP server and the recall hook in the agent's own config. Done here
+# rather than on the host because the agent home is a Docker volume, and done every start so
+# a mounted ~/.claude.json (a common way to carry a login in) is merged, never replaced.
+if [[ -n "${SANDSEAL_MEMORY_TOKEN:-}" ]] && command -v sandseal >/dev/null 2>&1; then
+  sandseal memory provision || echo "warning: memory provisioning failed, continuing without it" >&2
+fi
+
 echo "Starting agent CLI..." >&2
 
 exec "$@"
