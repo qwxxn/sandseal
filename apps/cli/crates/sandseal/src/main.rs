@@ -104,7 +104,7 @@ async fn start_remote(args: cli::StartArgs) -> Result<()> {
     let base = cli::resolve_api_url(args.api_url.as_deref());
     let token = auth::token::require_valid_token()?;
 
-    let started = instance::start_remote(&args)?;
+    let started = instance::start_remote(&args).await?;
 
     println!("  Sandbox running: {}", started.container_name);
     println!("  Creating remote session...");

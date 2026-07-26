@@ -58,6 +58,8 @@ pub enum MemoryCommand {
     Recall(MemoryRecallArgs),
     /// Serve the memory tools to the agent as a local MCP server over stdio
     Mcp(MemoryMcpArgs),
+    /// Register the MCP server and recall hook in the agent's config (runs inside the sandbox)
+    Provision,
 }
 
 #[derive(Parser)]

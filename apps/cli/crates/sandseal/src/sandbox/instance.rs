@@ -142,24 +142,35 @@ pub struct StartedSandbox {
     pub project_name: String,
     pub project_dir: PathBuf,
     pub guard: Arc<Mutex<CleanupGuard>>,
+    /// Session id to close on exit, which is what revokes the memory credential.
+    pub memory_session_id: Option<String>,
 }
 
 pub async fn start(args: StartArgs) -> Result<()> {
-    let started = prepare_and_launch(&args)?;
+    let started = prepare_and_launch(&args).await?;
+    let memory_session_id = started.memory_session_id.clone();
 
     // Local mode: attach interactively
     runtime::wait_and_attach(&started.container_name).await?;
 
     suggest_runtime_packages(&started.project_dir, &crate::config::Settings::default());
 
-    let mut guard = started.guard.lock().unwrap();
-    guard.cleanup();
+    {
+        let mut guard = started.guard.lock().unwrap();
+        guard.cleanup();
+    }
+
+    // Closing the session revokes the memory credential straight away, so a token left in a
+    // stopped container is worth nothing.
+    if let Some(id) = memory_session_id {
+        crate::memory::session::close(args.api_url.as_deref(), &id).await;
+    }
 
     Ok(())
 }
 
-pub fn start_remote(args: &StartArgs) -> Result<StartedSandbox> {
-    let started = prepare_and_launch(args)?;
+pub async fn start_remote(args: &StartArgs) -> Result<StartedSandbox> {
+    let started = prepare_and_launch(args).await?;
 
     // Wait for container to be running (non-interactive)
     let max_retries = 20;
@@ -179,7 +190,7 @@ pub fn start_remote(args: &StartArgs) -> Result<StartedSandbox> {
     bail!("container did not start in time");
 }
 
-fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
+async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     let project_dir = resolve_project_dir(&args.path)?;
     let project_name = create_project_name(&project_dir);
     let project_basename = sanitize_basename(&project_dir);
@@ -255,6 +266,13 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         args.rebuild,
     ))?;
 
+    // Memory credential. Best-effort: no login, no subscription or an unreachable backend
+    // all mean "this sandbox has no memory", never a failed start.
+    let memory = crate::memory::session::open(args.api_url.as_deref(), &project_dir, &instance_name).await;
+    if memory.is_some() {
+        info!("memory enabled for this session");
+    }
+
     // Generate compose override
     let compose_ctx = compose::ComposeContext {
         project_dir: &project_dir,
@@ -267,6 +285,7 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         settings: &settings,
         tmp_dir: &tmp_path,
         script_dir: &script_dir,
+        memory: memory.as_ref(),
     };
 
     let override_yaml = compose::generate_compose_override(&compose_ctx)?;
@@ -305,6 +324,7 @@ fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         project_name,
         project_dir,
         guard,
+        memory_session_id: memory.map(|m| m.id),
     })
 }
 

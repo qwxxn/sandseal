@@ -18,6 +18,8 @@ pub struct ComposeContext<'a> {
     pub settings: &'a Settings,
     pub tmp_dir: &'a Path,
     pub script_dir: &'a Path,
+    /// Memory credential for this session, when the account has memory. None = no memory.
+    pub memory: Option<&'a crate::memory::session::MemorySession>,
 }
 
 /// Generate docker-compose override YAML for a sandbox instance.
@@ -91,6 +93,15 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
     if skills_dir.is_dir() {
         volumes.push(format!("{}:/opt/sandseal/skills:ro", skills_dir.display()));
     }
+
+    // The memory bridge is this same binary, so mount it in. Read-only: the agent has no
+    // business rewriting the tool that carries its credential.
+    if ctx.memory.is_some() {
+        match std::env::current_exe() {
+            Ok(exe) => volumes.push(format!("{}:/usr/local/bin/sandseal:ro", exe.display())),
+            Err(err) => tracing::warn!("cannot locate own binary, memory bridge unavailable: {err}"),
+        }
+    }
     // Prestart scripts
     let prestart_dir = ctx.tmp_dir.join("prestart-scripts");
     if prestart_dir.is_dir() {
@@ -99,6 +110,14 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
 
     // Environment
     let mut environment = HashMap::new();
+
+    // Memory: the session credential and the backend it belongs to. Deliberately the only
+    // memory configuration in the container — there is no endpoint or key in a file for a
+    // prompt injection to point somewhere else.
+    if let Some(memory) = ctx.memory {
+        environment.insert("SANDSEAL_MEMORY_TOKEN".to_string(), memory.token.clone());
+        environment.insert("SANDSEAL_API_URL".to_string(), memory.api_url.clone());
+    }
 
     // Runtime package log path (for auto-suggest after exit)
     let pkg_log = format!("{}/.sandseal/.runtime-packages", ctx.project_dir.display());
@@ -278,6 +297,7 @@ mod tests {
             settings,
             tmp_dir: project_dir,
             script_dir,
+            memory: None,
         }
     }
 
@@ -305,6 +325,37 @@ mod tests {
         let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
 
         assert!(!yaml.contains("/opt/sandseal/skills"));
+    }
+
+    #[test]
+    fn memory_credential_and_bridge_binary_reach_the_container() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let session = crate::memory::session::MemorySession {
+            id: "sess_1".to_string(),
+            token: "tok_abc".to_string(),
+            api_url: "https://sandseal.io".to_string(),
+        };
+
+        let mut ctx = context(script_dir.path(), project.path(), &settings);
+        ctx.memory = Some(&session);
+        let yaml = generate_compose_override(&ctx).unwrap();
+
+        assert!(yaml.contains("SANDSEAL_MEMORY_TOKEN: \"tok_abc\""), "{yaml}");
+        assert!(yaml.contains("SANDSEAL_API_URL: \"https://sandseal.io\""), "{yaml}");
+        assert!(yaml.contains("/usr/local/bin/sandseal:ro"), "the bridge binary must be mounted:\n{yaml}");
+    }
+
+    #[test]
+    fn nothing_memory_related_leaks_in_when_the_session_has_no_memory() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
+
+        assert!(!yaml.contains("SANDSEAL_MEMORY_TOKEN"));
+        assert!(!yaml.contains("/usr/local/bin/sandseal"));
     }
 
     #[test]
