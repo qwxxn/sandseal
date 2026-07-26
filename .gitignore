@@ -27,3 +27,6 @@ internal-docs/
 
 # local memory test scratch (contains a dev session token)
 .memtest/
+
+# per-project sandbox config — may hold credentials passed into the sandbox
+.sandseal/
