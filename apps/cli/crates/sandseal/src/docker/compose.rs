@@ -94,6 +94,24 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         volumes.push(format!("{}:/opt/sandseal/skills:ro", skills_dir.display()));
     }
 
+    // Agent config that switches memory on, passed via --mcp-config/--settings rather than
+    // written into the agent's own files: those are commonly bind-mounted from the host, so
+    // writing them either fails (EBUSY on a mount point) or leaks the sandbox's hook into
+    // every session on the machine.
+    let memory_config = ctx.tmp_dir.join("memory");
+    if ctx.memory.is_some() && memory_config.is_dir() {
+        volumes.push(format!(
+            "{}:{}:ro",
+            crate::memory::provision::host_mcp_config(ctx.tmp_dir).display(),
+            crate::memory::provision::MCP_CONFIG_PATH
+        ));
+        volumes.push(format!(
+            "{}:{}:ro",
+            crate::memory::provision::host_settings(ctx.tmp_dir).display(),
+            crate::memory::provision::SETTINGS_PATH
+        ));
+    }
+
     // The memory bridge is this same binary, so mount it in. Read-only: the agent has no
     // business rewriting the tool that carries its credential.
     if ctx.memory.is_some() {
@@ -140,7 +158,7 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
     let command = if ctx.debug {
         vec!["bash".to_string()]
     } else {
-        build_agent_command(ctx.script_dir, ctx.agent_args)?
+        build_agent_command(ctx.script_dir, ctx.agent_args, ctx.memory.is_some())?
     };
 
     // Network mode
@@ -178,10 +196,14 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
     Ok(yaml)
 }
 
-fn build_agent_command(script_dir: &Path, agent_args: &[String]) -> Result<Vec<String>> {
+fn build_agent_command(script_dir: &Path, agent_args: &[String], memory: bool) -> Result<Vec<String>> {
     let command_file = script_dir.join("agents/claude/command.json");
     let content = std::fs::read_to_string(&command_file)?;
     let mut cmd: Vec<String> = serde_json::from_str(&content)?;
+    if memory {
+        cmd.extend(crate::memory::provision::agent_flags());
+    }
+    // User arguments last so they can still override anything we added.
     cmd.extend_from_slice(agent_args);
     Ok(cmd)
 }
@@ -348,6 +370,30 @@ mod tests {
     }
 
     #[test]
+    fn the_agent_is_told_to_load_the_memory_config() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let session = crate::memory::session::MemorySession {
+            id: "sess_1".to_string(),
+            token: "tok".to_string(),
+            api_url: "https://sandseal.io".to_string(),
+        };
+        crate::memory::provision::render(project.path()).unwrap();
+
+        let mut ctx = context(script_dir.path(), project.path(), &settings);
+        ctx.memory = Some(&session);
+        let yaml = generate_compose_override(&ctx).unwrap();
+
+        // Config travels on the command line: the agent's own files are often bind-mounted
+        // from the host, where writing either fails or leaks into every session on the box.
+        assert!(yaml.contains("--mcp-config"), "{yaml}");
+        assert!(yaml.contains(crate::memory::provision::MCP_CONFIG_PATH), "{yaml}");
+        assert!(yaml.contains("--settings"), "{yaml}");
+        assert!(yaml.contains(crate::memory::provision::SETTINGS_PATH), "{yaml}");
+    }
+
+    #[test]
     fn nothing_memory_related_leaks_in_when_the_session_has_no_memory() {
         let script_dir = script_dir_with_agent();
         let project = tempfile::tempdir().unwrap();
@@ -356,6 +402,7 @@ mod tests {
 
         assert!(!yaml.contains("SANDSEAL_MEMORY_TOKEN"));
         assert!(!yaml.contains("/usr/local/bin/sandseal"));
+        assert!(!yaml.contains("--mcp-config"));
     }
 
     #[test]
