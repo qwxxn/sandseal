@@ -24,3 +24,6 @@ Thumbs.db
 
 # Internal docs (not public)
 internal-docs/
+
+# local memory test scratch (contains a dev session token)
+.memtest/
