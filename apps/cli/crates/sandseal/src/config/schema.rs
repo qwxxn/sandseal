@@ -38,6 +38,18 @@ pub struct Settings {
     pub memory: Option<MemorySettings>,
 }
 
+/// Memory configuration for this sandbox.
+///
+/// Only `scope` exists so far. The rest of the planned surface — `enabled`, `space`,
+/// `retrieval`, `redaction` — lands here as it is built, which is why scope is nested from the
+/// start rather than flattened and moved later.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemorySettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<MemoryScopeSettings>,
+}
+
 /// Which slice of memory this sandbox writes to and reads from.
 ///
 /// Both fields exist because the project a note belongs to is otherwise the name of the
@@ -47,7 +59,7 @@ pub struct Settings {
 /// that cannot see each other.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MemorySettings {
+pub struct MemoryScopeSettings {
     /// Name notes are filed under. Defaults to the project directory's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
@@ -56,6 +68,16 @@ pub struct MemorySettings {
     /// space. Writes are pinned to the project either way, so attribution survives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cross_project: Option<bool>,
+}
+
+impl MemorySettings {
+    pub fn project(&self) -> Option<&str> {
+        self.scope.as_ref()?.project.as_deref()
+    }
+
+    pub fn cross_project(&self) -> Option<bool> {
+        self.scope.as_ref()?.cross_project
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

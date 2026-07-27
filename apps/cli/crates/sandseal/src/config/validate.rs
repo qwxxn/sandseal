@@ -133,19 +133,27 @@ mod tests {
 
     #[test]
     fn accepts_a_memory_scope() {
-        let value = serde_json::json!({"memory": {"project": "popitchiweb", "crossProject": false}});
+        let value =
+            serde_json::json!({"memory": {"scope": {"project": "popitchiweb", "crossProject": false}}});
         assert!(validate_value(value).is_ok());
-        assert!(schema_knows_path(&schema(), "memory.project"));
+        assert!(schema_knows_path(&schema(), "memory.scope.project"));
     }
 
     #[test]
     fn rejects_a_project_name_the_server_would_refuse() {
         // Same pattern the memory service enforces. Catching it here means a bad name fails
         // at `config edit`, not silently at the next session when the scope drops to null.
-        let err = validate_value(serde_json::json!({"memory": {"project": "not valid!"}}))
+        let err = validate_value(serde_json::json!({"memory": {"scope": {"project": "not valid!"}}}))
             .unwrap_err()
             .to_string();
-        assert!(err.contains("/memory/project"), "{err}");
+        assert!(err.contains("/memory/scope/project"), "{err}");
+    }
+
+    #[test]
+    fn rejects_the_flat_form_that_never_shipped() {
+        // Scope was nested before release. A settings file written against the flat shape must
+        // say so rather than parse into a sandbox that silently ignores it.
+        assert!(validate_value(serde_json::json!({"memory": {"project": "demo"}})).is_err());
     }
 
     #[test]
