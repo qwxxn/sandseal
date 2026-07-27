@@ -149,12 +149,28 @@ verify_checksum() {  # file sums_url name
 # Replace a directory we own wholesale instead of merging into it: a copy on top
 # of the old contents leaves files that a newer release deleted, and the sandbox
 # then builds against a mix of two versions.
+#
+# The old tree is moved aside, never deleted. This directory is installer-owned,
+# but it is also where a hand-edited Dockerfile or an own skill would sit, and
+# losing that silently to an upgrade is not a trade this script gets to make.
 replace_dir() {  # src dest
-    local src="$1" dest="$2" tmp="${2}.new.$$"
+    local src="$1" dest="$2" tmp="${2}.new.$$" extra=""
     rm -rf "${tmp}"
     mkdir -p "$(dirname "${dest}")"
     cp -R "${src}" "${tmp}"
-    rm -rf "${dest}"
+
+    if [[ -d "${dest}" ]]; then
+        extra="$( (cd "${dest}" && find . -type f | sort) \
+            | comm -23 - <(cd "${tmp}" && find . -type f | sort) )"
+        rm -rf "${dest}.previous"
+        mv "${dest}" "${dest}.previous"
+        if [[ -n "${extra}" ]]; then
+            warn "These are not part of the release and did not survive the upgrade:"
+            printf '%s\n' "${extra}" | sed "s|^\./|  ${dest}/|" >&2
+            warn "The whole previous directory is at ${dest}.previous"
+        fi
+    fi
+
     mv "${tmp}" "${dest}"
 }
 
