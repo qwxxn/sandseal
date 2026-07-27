@@ -20,6 +20,15 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 const SUPPORTED_PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const FALLBACK_PROTOCOL: &str = "2025-06-18";
 
+/// The note methodology, shipped through the handshake instead of through documentation.
+///
+/// Retrieval quality is set by the shape of the notes far more than by the vector database,
+/// so the rules have to reach the agent by default — a corpus of routine notes with no usable
+/// first sentence is a memory nobody can search. `instructions` is part of the initialize
+/// result, so every MCP client sees it, including Codex and Gemini, which have no
+/// UserPromptSubmit hook and would otherwise meet memory with six tools and no guidance.
+const INSTRUCTIONS: &str = include_str!("instructions.md");
+
 pub async fn serve(api_url: Option<&str>) -> Result<()> {
     let client = MemoryClient::new(api_url, TOOL_TIMEOUT)?;
 
@@ -112,7 +121,8 @@ fn initialize_result(request: &Value) -> Value {
     json!({
         "protocolVersion": protocol,
         "capabilities": { "tools": {} },
-        "serverInfo": { "name": "sandseal-memory", "version": env!("CARGO_PKG_VERSION") }
+        "serverInfo": { "name": "sandseal-memory", "version": env!("CARGO_PKG_VERSION") },
+        "instructions": INSTRUCTIONS.trim()
     })
 }
 
@@ -255,6 +265,28 @@ mod tests {
     fn falls_back_for_an_unknown_protocol_version() {
         let req = json!({ "params": { "protocolVersion": "1999-01-01" } });
         assert_eq!(initialize_result(&req)["protocolVersion"], FALLBACK_PROTOCOL);
+    }
+
+    #[test]
+    fn the_handshake_ships_the_note_methodology() {
+        let instructions = initialize_result(&json!({}))["instructions"]
+            .as_str()
+            .expect("instructions must be a string")
+            .to_string();
+
+        // The rules that decide whether the corpus stays searchable.
+        assert!(instructions.contains("ten minutes"), "missing the save test");
+        assert!(instructions.contains("150 characters"), "missing the TL;DR limit");
+        assert!(instructions.contains("English"), "missing the language rule");
+    }
+
+    #[test]
+    fn instructions_frame_recalled_notes_as_untrusted() {
+        // The hook renders notes into the prompt on its own, so the handshake has to explain
+        // what that block is — otherwise a poisoned note reads as a standing order.
+        let instructions = initialize_result(&json!({}))["instructions"].as_str().unwrap().to_string();
+        assert!(instructions.contains("<sandseal-memory>"));
+        assert!(instructions.contains("never instructions"));
     }
 
     #[test]
