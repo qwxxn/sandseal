@@ -3,6 +3,12 @@ set -euo pipefail
 
 INSTALL_DIR="${SANDSEAL_INSTALL_DIR:-$HOME/.local/bin}"
 DATA_DIR="${SANDSEAL_DIR:-$HOME/.sandseal}"
+# Mirrors Rust's dirs::config_dir(), which is where the CLI keeps auth.json.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    CONFIG_DIR="${HOME}/Library/Application Support/sandseal"
+else
+    CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/sandseal"
+fi
 ASSUME_YES=0; [[ "${SANDSEAL_ASSUME_YES:-0}" == "1" ]] && ASSUME_YES=1
 
 while [[ $# -gt 0 ]]; do
@@ -69,13 +75,21 @@ main() {
 
     strip_path_entries
 
-    # Remove data directory (agents, schema, tmp, auth)
-    if [[ -d "${DATA_DIR}" ]]; then
-        if confirm "Remove config and data directory (${DATA_DIR})?"; then
-            rm -rf "${DATA_DIR}"
-            info "Removed ${DATA_DIR}"
+    # Remove data and config. The login token is NOT in DATA_DIR: auth/token.rs
+    # puts it under dirs::config_dir(), so removing only ~/.sandseal left a live
+    # credential on disk after an "uninstall".
+    local -a dirs=()
+    [[ -d "${DATA_DIR}" ]] && dirs+=("${DATA_DIR}")
+    [[ -d "${CONFIG_DIR}" ]] && dirs+=("${CONFIG_DIR}")
+    if [[ ${#dirs[@]} -gt 0 ]]; then
+        if confirm "Remove config, data and the login token (${dirs[*]})?"; then
+            local d
+            for d in "${dirs[@]}"; do
+                rm -rf "${d}"
+                info "Removed ${d}"
+            done
         else
-            info "Kept ${DATA_DIR}"
+            info "Kept ${dirs[*]}"
         fi
     fi
 
