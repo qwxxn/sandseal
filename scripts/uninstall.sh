@@ -3,19 +3,59 @@ set -euo pipefail
 
 INSTALL_DIR="${SANDSEAL_INSTALL_DIR:-$HOME/.local/bin}"
 DATA_DIR="${SANDSEAL_DIR:-$HOME/.sandseal}"
+ASSUME_YES=0; [[ "${SANDSEAL_ASSUME_YES:-0}" == "1" ]] && ASSUME_YES=1
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --yes|-y) ASSUME_YES=1; shift ;;
+        --help|-h) printf 'Usage: uninstall.sh [--yes]\n'; exit 0 ;;
+        *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
+    esac
+done
 
 info() { printf '\033[0;34m%s\033[0m\n' "$1"; }
 warn() { printf '\033[0;33m%s\033[0m\n' "$1"; }
 
+# Read from the terminal, not stdin: the script is meant to be piped into bash
+# (`curl … | bash`), where stdin is the script itself and a plain `read` would
+# swallow the rest of it.
+have_tty() { { : < /dev/tty; } 2>/dev/null; }
+
 confirm() {
-    local prompt="$1"
-    printf '\033[0;33m%s [y/N] \033[0m' "${prompt}"
-    read -r answer
+    [[ ${ASSUME_YES} -eq 1 ]] && return 0
+    # -r /dev/tty is true even with no controlling terminal; only opening it tells.
+    have_tty || return 1
+    local answer=""
+    printf '\033[0;33m%s [y/N] \033[0m' "$1" > /dev/tty
+    read -r answer < /dev/tty || return 1
     [[ "${answer}" =~ ^[Yy] ]]
+}
+
+# Undo what install.sh appended to the shell rc files: the marker line plus the
+# export right after it.
+strip_path_entries() {
+    local marker="# added by the sandseal installer"
+    local rc tmp
+    for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.bash_profile" \
+              "${HOME}/.zprofile" "${HOME}/.profile" "${HOME}/.config/fish/config.fish"; do
+        [[ -f "${rc}" ]] || continue
+        grep -qF "${marker}" "${rc}" 2>/dev/null || continue
+        tmp="${rc}.sandseal-uninstall.$$"
+        awk -v m="${marker}" '
+            index($0, m) { skip = 2 }
+            skip > 0     { skip--; next }
+                         { print }
+        ' "${rc}" > "${tmp}" && mv "${tmp}" "${rc}"
+        info "Removed PATH entry from ${rc}"
+    done
 }
 
 main() {
     info "Sandseal uninstaller"
+    if [[ ${ASSUME_YES} -eq 0 ]] && ! have_tty; then
+        warn "No terminal to ask on — the binary goes, config and Docker leftovers stay."
+        warn "Re-run with --yes to remove everything."
+    fi
     echo ""
 
     # Remove binary
@@ -26,6 +66,8 @@ main() {
     else
         warn "Binary not found at ${binary}"
     fi
+
+    strip_path_entries
 
     # Remove data directory (agents, schema, tmp, auth)
     if [[ -d "${DATA_DIR}" ]]; then

@@ -24,10 +24,29 @@ jobs:
         working-directory: apps/cli
         run: cargo test --workspace
 
+  # A tag whose version does not match Cargo.toml would publish a binary that
+  # reports a different version than the release it came from — and the
+  # installer resolves versions from tags. Fail before spending four builds.
+  version-check:
+    name: Tag matches Cargo version
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(grep -m1 '^version' apps/cli/Cargo.toml | cut -d'"' -f2)"
+          echo "tag=${tag} cargo=${crate}"
+          if [ "${tag}" != "${crate}" ]; then
+            echo "::error::tag v${tag} does not match workspace version ${crate}"
+            exit 1
+          fi
+
   cli-release:
     name: Release Build (${{ matrix.target }})
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [cli-test]
+    needs: [cli-test, version-check]
     strategy:
       matrix:
         include:
@@ -70,3 +89,34 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}.tar.gz
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [cli-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # install.sh refuses to install a binary it cannot verify, so SHA256SUMS is
+      # a required asset, not a nicety.
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum *.tar.gz | tee SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber \
+              dist/*.tar.gz dist/SHA256SUMS
+          else
+            gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" --generate-notes \
+              dist/*.tar.gz dist/SHA256SUMS
+          fi
