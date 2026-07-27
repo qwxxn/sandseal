@@ -153,25 +153,61 @@ verify_checksum() {  # file sums_url name
 # The old tree is moved aside, never deleted. This directory is installer-owned,
 # but it is also where a hand-edited Dockerfile or an own skill would sit, and
 # losing that silently to an upgrade is not a trade this script gets to make.
+manifest_for() { printf '%s/.%s.manifest' "$(dirname "$1")" "$(basename "$1")"; }
+
+hash_tree() {  # dir -> "<sha>  ./path" lines, sorted by path
+    if have sha256sum; then (cd "$1" && find . -type f -exec sha256sum {} + | sort -k2)
+    elif have shasum;  then (cd "$1" && find . -type f -exec shasum -a 256 {} + | sort -k2)
+    else return 1
+    fi
+}
+
+# Which files in an installed tree are the user's own work. Comparing the old
+# tree against the *new* release cannot answer that — between two releases most
+# files legitimately differ, and every one of them would be reported as a local
+# edit. So compare against what the installer itself wrote last time.
+local_changes() {  # dir manifest -> "added <path>" / "edited <path>" lines
+    local dir="$1" manifest="$2" line sha path recorded
+    hash_tree "${dir}" 2>/dev/null | while IFS= read -r line; do
+        sha="${line%% *}"
+        path="${line#* }"; path="${path# }"
+        recorded="$(grep -F "  ${path}" "${manifest}" 2>/dev/null | head -1 | cut -d' ' -f1)"
+        if [[ -z "${recorded}" ]]; then
+            printf 'added  %s\n' "${path#./}"
+        elif [[ "${recorded}" != "${sha}" ]]; then
+            printf 'edited %s\n' "${path#./}"
+        fi
+    done
+}
+
 replace_dir() {  # src dest
-    local src="$1" dest="$2" tmp="${2}.new.$$" extra=""
+    local src="$1" dest="$2" tmp="${2}.new.$$" manifest changes=""
+    manifest="$(manifest_for "${dest}")"
     rm -rf "${tmp}"
     mkdir -p "$(dirname "${dest}")"
     cp -R "${src}" "${tmp}"
 
     if [[ -d "${dest}" ]]; then
-        extra="$( (cd "${dest}" && find . -type f | sort) \
-            | comm -23 - <(cd "${tmp}" && find . -type f | sort) )"
+        if [[ -f "${manifest}" ]]; then
+            changes="$(local_changes "${dest}" "${manifest}")"
+        else
+            # No manifest yet (installed before this existed, or no sha256 tool):
+            # additions are still visible, edits are not. Do not guess at them.
+            changes="$( (cd "${dest}" && find . -type f | sort) \
+                | comm -23 - <(cd "${tmp}" && find . -type f | sort) \
+                | sed 's|^\./|added  |' )"
+        fi
         rm -rf "${dest}.previous"
         mv "${dest}" "${dest}.previous"
-        if [[ -n "${extra}" ]]; then
-            warn "These are not part of the release and did not survive the upgrade:"
-            printf '%s\n' "${extra}" | sed "s|^\./|  ${dest}/|" >&2
-            warn "The whole previous directory is at ${dest}.previous"
+        if [[ -n "${changes}" ]]; then
+            warn "Your own changes under ${dest}/ are not part of the release:"
+            printf '%s\n' "${changes}" | sed 's|^|  |' >&2
+            warn "They are kept at ${dest}.previous"
         fi
     fi
 
     mv "${tmp}" "${dest}"
+    hash_tree "${dest}" > "${manifest}" 2>/dev/null || rm -f "${manifest}"
 }
 
 path_snippet() {  # shell -> line that puts INSTALL_DIR on PATH
