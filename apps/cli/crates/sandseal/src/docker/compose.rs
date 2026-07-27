@@ -135,6 +135,18 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
     if let Some(memory) = ctx.memory {
         environment.insert("SANDSEAL_MEMORY_TOKEN".to_string(), memory.token.clone());
         environment.insert("SANDSEAL_API_URL".to_string(), memory.api_url.clone());
+        // Always written, never omitted: the default lives in one place, and a session whose
+        // scope you have to infer from an absent variable is one nobody can debug.
+        let cross_project = ctx
+            .settings
+            .memory
+            .as_ref()
+            .and_then(|m| m.cross_project)
+            .unwrap_or(true);
+        environment.insert(
+            "SANDSEAL_MEMORY_CROSS_PROJECT".to_string(),
+            if cross_project { "1" } else { "0" }.to_string(),
+        );
     }
 
     // Runtime package log path (for auto-suggest after exit)
@@ -367,6 +379,46 @@ mod tests {
         assert!(yaml.contains("SANDSEAL_MEMORY_TOKEN: \"tok_abc\""), "{yaml}");
         assert!(yaml.contains("SANDSEAL_API_URL: \"https://sandseal.io\""), "{yaml}");
         assert!(yaml.contains("/usr/local/bin/sandseal:ro"), "the bridge binary must be mounted:\n{yaml}");
+    }
+
+    #[test]
+    fn recall_spans_the_space_unless_the_settings_narrow_it() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let session = crate::memory::session::MemorySession {
+            id: "sess_1".to_string(),
+            token: "tok".to_string(),
+            api_url: "https://sandseal.io".to_string(),
+        };
+
+        let default = Settings::default();
+        let mut ctx = context(script_dir.path(), project.path(), &default);
+        ctx.memory = Some(&session);
+        let yaml = generate_compose_override(&ctx).unwrap();
+        assert!(yaml.contains("SANDSEAL_MEMORY_CROSS_PROJECT: \"1\""), "{yaml}");
+
+        let narrowed = Settings {
+            memory: Some(crate::config::schema::MemorySettings {
+                project: None,
+                cross_project: Some(false),
+            }),
+            ..Settings::default()
+        };
+        let mut ctx = context(script_dir.path(), project.path(), &narrowed);
+        ctx.memory = Some(&session);
+        let yaml = generate_compose_override(&ctx).unwrap();
+        assert!(yaml.contains("SANDSEAL_MEMORY_CROSS_PROJECT: \"0\""), "{yaml}");
+    }
+
+    #[test]
+    fn no_memory_means_no_scope_variable() {
+        // Without a credential the variable would describe a session that does not exist.
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
+
+        assert!(!yaml.contains("SANDSEAL_MEMORY_CROSS_PROJECT"), "{yaml}");
     }
 
     #[test]

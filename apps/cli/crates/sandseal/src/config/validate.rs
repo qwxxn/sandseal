@@ -124,6 +124,30 @@ mod tests {
         assert!(!schema_knows_path(&s, ""));
     }
 
+    fn validate_value(value: Value) -> Result<Value> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+        validate_settings(&path)
+    }
+
+    #[test]
+    fn accepts_a_memory_scope() {
+        let value = serde_json::json!({"memory": {"project": "popitchiweb", "crossProject": false}});
+        assert!(validate_value(value).is_ok());
+        assert!(schema_knows_path(&schema(), "memory.project"));
+    }
+
+    #[test]
+    fn rejects_a_project_name_the_server_would_refuse() {
+        // Same pattern the memory service enforces. Catching it here means a bad name fails
+        // at `config edit`, not silently at the next session when the scope drops to null.
+        let err = validate_value(serde_json::json!({"memory": {"project": "not valid!"}}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("/memory/project"), "{err}");
+    }
+
     #[test]
     fn missing_directive_is_fine() {
         let value = serde_json::json!({"network": {"mode": "bridge"}});

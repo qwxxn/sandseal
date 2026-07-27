@@ -1,6 +1,6 @@
 ---
 name: sandseal
-description: How to change the configuration of the Sandseal sandbox you are running inside — settings.json layers and merge order, profiles, $replace, hiding and exposing files, extra host directories, reaching services on the host, system packages, hooks, env vars, and which command applies each change. Use whenever the sandbox blocks or lacks something: a missing tool or package, a file you cannot read (often a secret), a database or port you cannot reach, a directory outside the project, an environment variable, an out-of-memory build, or when the user says "add it to the sandbox config", "why can't I see X", "let me reach Y", "settings.json", "sandseal profile".
+description: How to change the configuration of the Sandseal sandbox you are running inside — settings.json layers and merge order, profiles, $replace, hiding and exposing files, extra host directories, reaching services on the host, system packages, hooks, env vars, which slice of memory the sandbox reads and writes, and which command applies each change. Use whenever the sandbox blocks or lacks something: a missing tool or package, a file you cannot read (often a secret), a database or port you cannot reach, a directory outside the project, an environment variable, an out-of-memory build, notes filed under the wrong project or missing from recall, or when the user says "add it to the sandbox config", "why can't I see X", "let me reach Y", "settings.json", "sandseal profile".
 ---
 
 # Configuring the sandbox you run in
@@ -196,6 +196,23 @@ as a request for host access: propose, explain, and let the user decide.
 
 Gives the container the host's Docker socket, which is effectively root on the host. Do not
 enable it to work around a smaller problem. A profile may forbid it outright.
+
+### `memory` — which slice of memory this sandbox uses
+
+```json
+{ "memory": { "project": "popitchiweb", "crossProject": true } }
+```
+
+Notes are filed under a project name, which defaults to the name of the directory the sandbox
+was started in. Set `project` when that guess is wrong — a sandbox opened over several projects
+otherwise files everything under the parent directory's name, and the same project opened from
+a different directory lands in a slice that cannot see the first one. Letters, digits, dot,
+underscore and hyphen only; a name outside that set is rejected at validation.
+
+`crossProject` decides what recall reads, not what it writes. Left at its default (`true`),
+searches cover the whole memory space, so notes written from other projects stay reachable. Set
+it to `false` to keep recall inside this project. Notes are always written under this sandbox's
+project either way, so attribution survives regardless.
 
 ## Which command applies the change
 

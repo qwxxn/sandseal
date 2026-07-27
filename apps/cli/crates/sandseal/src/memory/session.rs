@@ -17,8 +17,13 @@ pub struct MemorySession {
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-pub async fn open(api_url: Option<&str>, project_dir: &Path, instance_name: &str) -> Option<MemorySession> {
-    match resolve(api_url, project_dir, instance_name).await {
+pub async fn open(
+    api_url: Option<&str>,
+    project_dir: &Path,
+    instance_name: &str,
+    project_override: Option<&str>,
+) -> Option<MemorySession> {
+    match resolve(api_url, project_dir, instance_name, project_override).await {
         Ok(session) => Some(session),
         Err(reason) => {
             // Info, not debug. Losing memory never stops the sandbox, but a silent
@@ -34,6 +39,7 @@ async fn resolve(
     api_url: Option<&str>,
     project_dir: &Path,
     instance_name: &str,
+    project_override: Option<&str>,
 ) -> Result<MemorySession, String> {
     let token = match crate::auth::token::load_token() {
         Ok(Some(token)) if !token.is_expired() => token,
@@ -43,7 +49,7 @@ async fn resolve(
     };
 
     let base = crate::cli::resolve_api_url(api_url).trim_end_matches('/');
-    request(&token.access_token, base, project_dir, instance_name).await
+    request(&token.access_token, base, project_dir, instance_name, project_override).await
 }
 
 /// Every error here becomes the user-facing half of the line above, which is the
@@ -53,12 +59,9 @@ async fn request(
     base: &str,
     project_dir: &Path,
     instance_name: &str,
+    project_override: Option<&str>,
 ) -> Result<MemorySession, String> {
-    let project_name = project_dir
-        .file_name()
-        .ok_or("the project directory has no name")?
-        .to_string_lossy()
-        .to_string();
+    let project_name = project_name(project_dir, project_override)?;
 
     let client = reqwest::Client::builder()
         .timeout(TIMEOUT)
@@ -110,6 +113,24 @@ async fn request(
     })
 }
 
+/// Which slice of memory this session writes to.
+///
+/// The directory name is a guess, and a bad one whenever a sandbox spans several projects: it
+/// files everything under the parent directory, and the same project opened from elsewhere
+/// lands somewhere else again. `memory.project` is how you say what this sandbox actually is,
+/// so it wins outright.
+fn project_name(project_dir: &Path, project_override: Option<&str>) -> Result<String, String> {
+    if let Some(name) = project_override.map(str::trim).filter(|name| !name.is_empty()) {
+        return Ok(name.to_string());
+    }
+
+    Ok(project_dir
+        .file_name()
+        .ok_or("the project directory has no name")?
+        .to_string_lossy()
+        .to_string())
+}
+
 /// Ends the session, which revokes the credential immediately — the whole reason it is
 /// database-backed rather than signed. Best-effort: an unreachable backend leaves the session
 /// marked running and it expires by other means, but the sandbox must still shut down cleanly.
@@ -156,7 +177,24 @@ mod tests {
     }
 
     async fn call(base: &str) -> Result<MemorySession, String> {
-        request("token", base, Path::new("/tmp/demo-project"), "agent-1").await
+        request("token", base, Path::new("/tmp/demo-project"), "agent-1", None).await
+    }
+
+    #[test]
+    fn the_directory_name_is_only_the_fallback() {
+        assert_eq!(project_name(Path::new("/home/me/development"), None).unwrap(), "development");
+        assert_eq!(
+            project_name(Path::new("/home/me/development"), Some("popitchiweb")).unwrap(),
+            "popitchiweb"
+        );
+    }
+
+    #[test]
+    fn a_blank_override_is_not_an_override() {
+        // `"memory": { "project": "" }` is someone clearing the key, not asking for a
+        // nameless project — the server would reject the empty string anyway.
+        assert_eq!(project_name(Path::new("/home/me/demo"), Some("  ")).unwrap(), "demo");
+        assert_eq!(project_name(Path::new("/home/me/demo"), Some(" api ")).unwrap(), "api");
     }
 
     /// Not `unwrap_err`: that needs `MemorySession: Debug`, and a struct holding a

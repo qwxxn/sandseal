@@ -1,5 +1,7 @@
-Persistent memory that survives across sessions. Notes are markdown with vector embeddings,
-already scoped to this user and project by the server — you never pass an author or a project.
+Persistent memory that survives across sessions. Notes are markdown with vector embeddings.
+Scope is the server's job, not yours: a note you write is filed under this sandbox's project
+automatically, and by default search reaches across the projects in your space, so work you did
+elsewhere stays findable. You never pass an author or a project.
 
 ## Recall happens on its own
 
@@ -58,8 +60,8 @@ one per note.
   `preference`.
 - `tech:` — optional, at most two, and only when filtering by them would genuinely help.
 
-Never tag the project or the author. The server already scopes every note to both, so those
-tags filter nothing and only dilute the ones that do.
+Never tag the project or the author. The server records both on the note itself, so those tags
+filter nothing and only dilute the ones that do.
 
 ## Links
 
