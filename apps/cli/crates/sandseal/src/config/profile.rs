@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use crate::config::validate::validate_settings;
 
-const SCHEMA_URL: &str =
-    "https://raw.githubusercontent.com/sandseal/sandseal/main/schema/settings.schema.json";
+// Served from the domain, not from raw.githubusercontent: every generated profile
+// carries this URL forever, and the domain outlives any repo or org rename.
+const SCHEMA_URL: &str = "https://sandseal.io/schema/settings.schema.json";
 
 /// Directory holding named profile definitions.
 pub fn profiles_dir() -> Result<PathBuf> {
