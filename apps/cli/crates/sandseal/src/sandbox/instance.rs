@@ -290,7 +290,7 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         args.api_url.as_deref(),
         &project_dir,
         &instance_name,
-        settings.memory.as_ref().and_then(|m| m.project.as_deref()),
+        settings.memory.as_ref().and_then(|m| m.project()),
     )
     .await;
     if memory.is_some() {

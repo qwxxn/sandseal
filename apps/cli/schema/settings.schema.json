@@ -208,18 +208,25 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "project": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9._-]{1,100}$",
-          "description": "Name this sandbox's notes are filed under. Defaults to the project directory's name, which is wrong when one sandbox spans several projects, or when the same project is opened from different directories. Letters, digits, dot, underscore and hyphen only."
-        },
-        "crossProject": {
-          "type": "boolean",
-          "default": true,
-          "description": "Whether recall searches the whole memory space or only this project. Default true: notes written from other projects stay reachable. Writes are pinned to this project either way."
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,100}$",
+              "description": "Name this sandbox's notes are filed under. Defaults to the project directory's name, which is wrong when one sandbox spans several projects, or when the same project is opened from different directories. Letters, digits, dot, underscore and hyphen only."
+            },
+            "crossProject": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether recall searches the whole memory space or only this project. Default true: notes written from other projects stay reachable. Writes are pinned to this project either way."
+            }
+          },
+          "description": "Which slice of memory this sandbox writes to and reads from."
         }
       },
-      "description": "Memory scope for this sandbox."
+      "description": "Memory configuration for this sandbox."
     }
   }
 }

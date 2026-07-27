@@ -197,10 +197,10 @@ as a request for host access: propose, explain, and let the user decide.
 Gives the container the host's Docker socket, which is effectively root on the host. Do not
 enable it to work around a smaller problem. A profile may forbid it outright.
 
-### `memory` — which slice of memory this sandbox uses
+### `memory.scope` — which slice of memory this sandbox uses
 
 ```json
-{ "memory": { "project": "popitchiweb", "crossProject": true } }
+{ "memory": { "scope": { "project": "popitchiweb", "crossProject": true } } }
 ```
 
 Notes are filed under a project name, which defaults to the name of the directory the sandbox
@@ -213,6 +213,9 @@ underscore and hyphen only; a name outside that set is rejected at validation.
 searches cover the whole memory space, so notes written from other projects stay reachable. Set
 it to `false` to keep recall inside this project. Notes are always written under this sandbox's
 project either way, so attribution survives regardless.
+
+Both keys live under `memory.scope`, not directly under `memory` — the rest of the memory
+settings arrive alongside `scope`, not inside it.
 
 ## Which command applies the change
 

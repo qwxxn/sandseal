@@ -141,7 +141,7 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
             .settings
             .memory
             .as_ref()
-            .and_then(|m| m.cross_project)
+            .and_then(|m| m.cross_project())
             .unwrap_or(true);
         environment.insert(
             "SANDSEAL_MEMORY_CROSS_PROJECT".to_string(),
@@ -399,8 +399,10 @@ mod tests {
 
         let narrowed = Settings {
             memory: Some(crate::config::schema::MemorySettings {
-                project: None,
-                cross_project: Some(false),
+                scope: Some(crate::config::schema::MemoryScopeSettings {
+                    project: None,
+                    cross_project: Some(false),
+                }),
             }),
             ..Settings::default()
         };
