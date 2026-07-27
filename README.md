@@ -7,7 +7,7 @@ Run Claude Code (and other AI agents) in a secure, containerized environment wit
 ## Quick start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sandseal/sandseal/main/scripts/install.sh | bash
+curl -fsSL https://sandseal.io/install.sh | bash
 ```
 
 Then in any project directory:
@@ -17,6 +17,28 @@ sandseal start .
 ```
 
 This builds a sandbox image, mounts your project, and drops you into an isolated shell with the agent installed.
+
+The installer downloads the binary for your platform, verifies its SHA256, puts it on
+your `PATH` and checks that Docker is usable — offering to install it if it is missing.
+Re-running it upgrades in place. Linux and macOS are supported natively; on Windows run
+it inside WSL2.
+
+```bash
+curl -fsSL https://sandseal.io/install.sh | bash -s -- --help
+
+  --version X.Y.Z     install a specific version
+  --dir PATH          where the binary goes (default: ~/.local/bin)
+  --no-modify-path    do not touch shell rc files
+  --with-docker       install Docker without asking
+  --no-docker         never install Docker
+  --yes               answer every prompt with yes
+```
+
+To remove it again:
+
+```bash
+curl -fsSL https://sandseal.io/uninstall.sh | bash
+```
 
 ## Features
 
@@ -39,7 +61,7 @@ Create `.sandseal/settings.json` in your project (or `~/.sandseal/settings.json`
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/sandseal/sandseal/main/schema/settings.schema.json",
+  "$schema": "https://sandseal.io/schema/settings.schema.json",
   "files": {
     "exclude": [".env", ".env.*", "secrets/"],
     "include": {
@@ -62,7 +84,7 @@ Create `.sandseal/settings.json` in your project (or `~/.sandseal/settings.json`
 }
 ```
 
-Full schema: [`schema/settings.schema.json`](schema/settings.schema.json)
+Full schema: [`apps/cli/schema/settings.schema.json`](apps/cli/schema/settings.schema.json)
 
 ## Profiles
 
@@ -80,7 +102,7 @@ sandseal config effective                   # merged settings actually used
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/sandseal/sandseal/main/schema/settings.schema.json",
+  "$schema": "https://sandseal.io/schema/settings.schema.json",
   "description": "unattended runs: no prod secrets, no host network, no docker socket",
   "$replace": ["environment", "files.include"],
   "environment": {},
@@ -174,7 +196,7 @@ The agent runs as a non-root user with UID matching your host user, so file perm
 ## Building from source
 
 ```bash
-cd cli
+cd apps/cli
 cargo build --release
 ```
 
@@ -188,12 +210,12 @@ sandseal/
 │   ├── crates/
 │   │   ├── sandseal/     Main binary
 │   │   └── sandseal-protocol/  Shared types
+│   ├── agents/           Sandbox image: Dockerfiles, entrypoint, agent installs
+│   │   ├── Dockerfile.base
+│   │   └── claude/       Claude Code agent
+│   ├── schema/           JSON Schema for settings
 │   └── Cargo.toml
-├── agents/               Agent Dockerfiles and install scripts
-│   ├── Dockerfile        Base sandbox image
-│   └── claude/           Claude Code agent
-├── schema/               JSON Schema for settings
-└── scripts/              Install scripts
+└── scripts/              install.sh, uninstall.sh
 ```
 
 ## Attribution
