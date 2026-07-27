@@ -33,6 +33,29 @@ pub struct Settings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docker: Option<DockerSettings>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemorySettings>,
+}
+
+/// Which slice of memory this sandbox writes to and reads from.
+///
+/// Both fields exist because the project a note belongs to is otherwise the name of the
+/// directory the sandbox was started in, and that is wrong in two directions: a sandbox opened
+/// over several projects gets the parent directory's name, and one project gets a different
+/// slice depending on where you launched from — the same knowledge then splits into buckets
+/// that cannot see each other.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemorySettings {
+    /// Name notes are filed under. Defaults to the project directory's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+
+    /// Whether recall reads the whole space or stays inside this project. Defaults to the whole
+    /// space. Writes are pinned to the project either way, so attribution survives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_project: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

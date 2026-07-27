@@ -17,6 +17,25 @@ pub struct MemoryClient {
 /// Session credential injected into the sandbox. Never the account token.
 const CREDENTIAL_ENV: &str = "SANDSEAL_MEMORY_TOKEN";
 
+/// Whether a search may leave this session's project. Injected alongside the credential, so
+/// like the credential it is set by the host and not by anything the agent can reach.
+const CROSS_PROJECT_ENV: &str = "SANDSEAL_MEMORY_CROSS_PROJECT";
+
+/// Reads span the whole space unless the host says otherwise. The alternative loses notes
+/// outright: a project opened from a different directory lands in a different slice, and its
+/// notes then exist but can never be recalled. Writes stay pinned to the session's project
+/// regardless of this flag, so a note is still attributed to where the work happened.
+fn cross_project() -> bool {
+    cross_project_from(std::env::var(CROSS_PROJECT_ENV).ok().as_deref())
+}
+
+fn cross_project_from(value: Option<&str>) -> bool {
+    match value {
+        Some(value) => !matches!(value.trim(), "0" | "false" | "no"),
+        None => true,
+    }
+}
+
 impl MemoryClient {
     /// Prefers the per-session credential from the sandbox environment, falling back to the
     /// stored account token so `sandseal memory` also works on the host.
@@ -69,7 +88,12 @@ impl MemoryClient {
         include_linked: bool,
         tags: Option<Vec<String>>,
     ) -> Result<Value> {
-        let mut body = json!({ "query": query, "limit": limit, "includeLinked": include_linked });
+        let mut body = json!({
+            "query": query,
+            "limit": limit,
+            "includeLinked": include_linked,
+            "crossProject": cross_project(),
+        });
         if let Some(tags) = tags {
             body["tags"] = json!(tags);
         }
@@ -116,5 +140,30 @@ impl MemoryClient {
         }
         self.send(reqwest::Method::POST, &format!("/notes/{id}/links"), Some(body))
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_session_without_the_flag_reads_the_whole_space() {
+        // The absent case is the one that matters: an older container image carries no such
+        // variable, and narrowing its recall would hide notes it used to find.
+        assert!(cross_project_from(None));
+    }
+
+    #[test]
+    fn the_host_can_narrow_recall_to_the_project() {
+        assert!(!cross_project_from(Some("0")));
+        assert!(!cross_project_from(Some("false")));
+        assert!(!cross_project_from(Some(" no ")));
+    }
+
+    #[test]
+    fn anything_else_keeps_recall_wide() {
+        assert!(cross_project_from(Some("1")));
+        assert!(cross_project_from(Some("true")));
     }
 }

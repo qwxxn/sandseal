@@ -286,7 +286,13 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
 
     // Memory credential. Best-effort: no login, no subscription or an unreachable backend
     // all mean "this sandbox has no memory", never a failed start.
-    let memory = crate::memory::session::open(args.api_url.as_deref(), &project_dir, &instance_name).await;
+    let memory = crate::memory::session::open(
+        args.api_url.as_deref(),
+        &project_dir,
+        &instance_name,
+        settings.memory.as_ref().and_then(|m| m.project.as_deref()),
+    )
+    .await;
     if memory.is_some() {
         crate::memory::provision::render(&tmp_path)
             .context("failed to render memory agent config")?;
