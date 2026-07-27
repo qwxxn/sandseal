@@ -13,10 +13,14 @@ curl -fsSL https://sandseal.io/install.sh | bash
 Then in any project directory:
 
 ```bash
-sandseal start .
+sandseal start
 ```
 
 This builds a sandbox image, mounts your project, and drops you into an isolated shell with the agent installed.
+
+The path argument is optional — without it Sandseal uses the current directory, so
+`sandseal start` and `sandseal start .` do the same thing. Pass a path to start a sandbox
+for another project: `sandseal start ~/code/other-project`.
 
 The installer downloads the binary for your platform, verifies its SHA256, puts it on
 your `PATH` and checks that Docker is usable — offering to install it if it is missing.

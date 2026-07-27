@@ -282,7 +282,7 @@ check_docker() {
         else
             warn "Docker is installed but the daemon is not reachable."
             if [[ "$(uname -s)" == "Darwin" ]]; then
-                warn "  Start Docker Desktop, then run: sandseal start ."
+                warn "  Start Docker Desktop, then run: sandseal start"
             elif grep -qi microsoft /proc/version 2>/dev/null; then
                 warn "  On WSL: start Docker Desktop and enable WSL integration for this distro."
             else
@@ -395,7 +395,7 @@ main() {
         info "Open a new terminal, or run this once in the current one:"
         info "  export PATH=\"${INSTALL_DIR}:\$PATH\""
     fi
-    info "Then start a sandbox:  sandseal start ."
+    info "Then start a sandbox:  sandseal start"
 }
 
 main "$@"
