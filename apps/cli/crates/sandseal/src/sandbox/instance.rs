@@ -149,7 +149,6 @@ fn find_script_dir() -> Result<PathBuf> {
 
 pub struct StartedSandbox {
     pub container_name: String,
-    pub project_name: String,
     pub project_dir: PathBuf,
     pub guard: Arc<Mutex<CleanupGuard>>,
     /// Session id to close on exit, which is what revokes the memory credential.
@@ -347,7 +346,6 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
 
     Ok(StartedSandbox {
         container_name,
-        project_name,
         project_dir,
         guard,
         memory_session_id: memory.map(|m| m.id),

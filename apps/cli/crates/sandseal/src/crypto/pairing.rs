@@ -26,25 +26,6 @@ impl QrPairingOffer {
         )
     }
 
-    pub fn from_params(eph_b64: &str, id_b64: &str, code: &str) -> Result<Self> {
-        let eph_bytes = BASE64URL.decode(eph_b64)?;
-        let id_bytes = BASE64URL.decode(id_b64)?;
-
-        if eph_bytes.len() != 32 || id_bytes.len() != 32 {
-            bail!("invalid key length in QR payload");
-        }
-
-        let mut ephemeral_public = [0u8; 32];
-        let mut identity_public = [0u8; 32];
-        ephemeral_public.copy_from_slice(&eph_bytes);
-        identity_public.copy_from_slice(&id_bytes);
-
-        Ok(Self {
-            ephemeral_public,
-            verification_code: code.to_string(),
-            identity_public,
-        })
-    }
 }
 
 /// Generate a 6-digit verification code from shared secret.
@@ -115,14 +96,6 @@ impl PasswordPairing {
         let salt = encrypt::generate_salt();
         let shared_key = encrypt::derive_key_from_password(password.as_bytes(), &salt)?;
         Ok(Self { salt, shared_key })
-    }
-
-    pub fn join(password: &str, salt: &[u8; 16]) -> Result<Self> {
-        let shared_key = encrypt::derive_key_from_password(password.as_bytes(), salt)?;
-        Ok(Self {
-            salt: *salt,
-            shared_key,
-        })
     }
 
     /// Encrypt our identity public key with the password-derived key.
@@ -198,36 +171,18 @@ mod tests {
         assert_eq!(result.verification_code, browser_code);
     }
 
+    /// Only the CLI side: the browser half of this exchange is TypeScript, and
+    /// the two agree because both match `test-vectors.json`, not because a Rust
+    /// joiner reproduced the key here.
     #[test]
-    fn password_pairing_exchange() {
-        let password = "test-password-1234";
+    fn password_identity_roundtrip() {
+        let identity = IdentityKeyPair::generate();
+        let pairing = PasswordPairing::initiate("test-password-1234").unwrap();
 
-        let cli_identity = IdentityKeyPair::generate();
-        let browser_identity = IdentityKeyPair::generate();
+        let encrypted = pairing.encrypt_identity(&identity).unwrap();
+        let decrypted = pairing.decrypt_identity(&encrypted).unwrap();
 
-        let initiator = PasswordPairing::initiate(password).unwrap();
-        let joiner = PasswordPairing::join(password, &initiator.salt).unwrap();
-
-        // Exchange identity keys
-        let cli_encrypted = initiator.encrypt_identity(&cli_identity).unwrap();
-        let browser_encrypted = joiner.encrypt_identity(&browser_identity).unwrap();
-
-        let received_cli_id = joiner.decrypt_identity(&cli_encrypted).unwrap();
-        let received_browser_id = initiator.decrypt_identity(&browser_encrypted).unwrap();
-
-        assert_eq!(received_cli_id, cli_identity.public_key_bytes());
-        assert_eq!(received_browser_id, browser_identity.public_key_bytes());
-    }
-
-    #[test]
-    fn wrong_password_pairing_fails() {
-        let cli_identity = IdentityKeyPair::generate();
-
-        let initiator = PasswordPairing::initiate("correct").unwrap();
-        let joiner = PasswordPairing::join("wrong", &initiator.salt).unwrap();
-
-        let encrypted = initiator.encrypt_identity(&cli_identity).unwrap();
-        assert!(joiner.decrypt_identity(&encrypted).is_err());
+        assert_eq!(decrypted, identity.public_key_bytes());
     }
 
     #[test]
