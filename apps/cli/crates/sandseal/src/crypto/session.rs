@@ -74,8 +74,8 @@ impl SessionKeys {
         let shared = our_keypair.diffie_hellman(their_public);
         let shared_bytes = shared.as_bytes().to_vec();
 
-        let info = format!("sandseal-session-v1-gen0").into_bytes();
-        let (key_a, key_b) = hkdf_derive_pair(&shared_bytes, None, &info);
+        let info = b"sandseal-session-v1-gen0";
+        let (key_a, key_b) = hkdf_derive_pair(&shared_bytes, None, info);
 
         let (send_key, recv_key) = if is_initiator {
             (key_a, key_b)
@@ -179,35 +179,6 @@ impl SessionKeys {
     }
 }
 
-/// Derive session keys from a pre-shared password (for password-based pairing).
-pub fn session_keys_from_password(
-    password: &[u8],
-    salt: &[u8],
-    is_initiator: bool,
-) -> Result<SessionKeys> {
-    let psk = encrypt::derive_key_from_password(password, salt)?;
-    let info = b"sandseal-session-v1-gen0";
-    let (key_a, key_b) = hkdf_derive_pair(&psk, None, info);
-
-    let (send_key, recv_key) = if is_initiator {
-        (key_a, key_b)
-    } else {
-        (key_b, key_a)
-    };
-
-    Ok(SessionKeys {
-        send_key,
-        recv_key,
-        send_seq: 0,
-        recv_seq: 0,
-        send_count: 0,
-        recv_count: 0,
-        created_at: Instant::now(),
-        shared_secret: psk.to_vec(),
-        generation: 0,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,27 +257,6 @@ mod tests {
         let f2 = alice.seal(MessageType::Data, b"after rotation").unwrap();
         let (_, p2) = bob.open(&f2).unwrap();
         assert_eq!(p2, b"after rotation");
-    }
-
-    #[test]
-    fn password_based_session() {
-        let salt = encrypt::generate_salt();
-        let mut alice = session_keys_from_password(b"shared-secret", &salt, true).unwrap();
-        let mut bob = session_keys_from_password(b"shared-secret", &salt, false).unwrap();
-
-        let frame = alice.seal(MessageType::Data, b"password-paired").unwrap();
-        let (_, plaintext) = bob.open(&frame).unwrap();
-        assert_eq!(plaintext, b"password-paired");
-    }
-
-    #[test]
-    fn wrong_password_fails() {
-        let salt = encrypt::generate_salt();
-        let mut alice = session_keys_from_password(b"correct", &salt, true).unwrap();
-        let mut bob = session_keys_from_password(b"wrong", &salt, false).unwrap();
-
-        let frame = alice.seal(MessageType::Data, b"secret").unwrap();
-        assert!(bob.open(&frame).is_err());
     }
 
     #[test]
