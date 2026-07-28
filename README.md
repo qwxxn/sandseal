@@ -4,6 +4,8 @@ Isolated Docker sandboxes for AI coding agents.
 
 Run Claude Code (and other AI agents) in a secure, containerized environment with fine-grained file access control, custom dependencies, and host networking — without touching your host system.
 
+The CLI is free and works entirely offline. There is no telemetry, and no HTTP request leaves it unless you explicitly run `sandseal login`.
+
 ## Quick start
 
 ```bash
@@ -196,6 +198,43 @@ Sandseal generates a Docker Compose configuration on the fly:
 6. Cleans up on exit (SIGINT/SIGTERM handled gracefully)
 
 The agent runs as a non-root user with UID matching your host user, so file permissions work seamlessly.
+
+## Account and online features
+
+Sandseal needs no account. Everything documented above — the sandbox, file access
+control, profiles, hooks, dependencies — runs on your machine and never talks to
+sandseal.io.
+
+| Works offline, no account | Requires `sandseal login` |
+|---|---|
+| `start`, `build`, `destroy`, `status` | `memory` — semantic memory shared across sandboxes |
+| `config` and profiles | `connect`, `pair`, `chat` — drive a sandbox from the dashboard |
+| file exclusions, inclusions, workspaces | `start --remote` |
+| hooks, dependencies, service endpoints | `whoami` |
+
+There is no license key and no usage check. The binary holds no credential until
+`sandseal login` writes one, and every network call in the CLI sits behind that
+credential — so on a machine that never logged in, Sandseal makes no outbound
+request at all. Installing and upgrading downloads from GitHub Releases; that is
+the only other time anything is fetched.
+
+### What the backend adds
+
+Logging in enables the parts that cannot work on a single machine:
+
+- **Memory** — notes are embedded and stored server-side, so an agent in one
+  sandbox recalls what an agent in another one learned. Requires a Pro
+  subscription.
+- **Remote access** — `sandseal connect` bridges a running sandbox to the
+  dashboard through a relay, letting you drive the agent from a browser or a
+  phone. Terminal traffic is end-to-end encrypted; the relay only ever forwards
+  ciphertext.
+- **Dashboard** — session history, config sync and team management.
+
+Online features degrade instead of failing. If you are not logged in, hold no
+subscription, or sandseal.io is simply unreachable, `sandseal start` reports that
+memory is unavailable for the session and carries on — a missing backend never
+blocks a sandbox from starting.
 
 ## Building from source
 
