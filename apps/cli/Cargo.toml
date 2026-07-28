@@ -5,7 +5,7 @@ members = ["crates/sandseal", "crates/sandseal-protocol"]
 [workspace.package]
 version = "0.1.2"
 edition = "2024"
-license = "MIT"
+license = "Apache-2.0"
 authors = ["qwxxn <qwuin.business@gmail.com>"]
 
 [workspace.dependencies]

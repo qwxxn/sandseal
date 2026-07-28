@@ -1,0 +1,22 @@
+Sandseal
+Copyright 2026 Sandseal
+
+This product includes software developed by Sandseal (https://sandseal.io).
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file for the
+full terms.
+
+--------------------------------------------------------------------------------
+
+Sandseal is an independent implementation, written from scratch in Rust, that
+builds on concepts from Hole:
+
+    Hole — https://github.com/lukashornych/hole
+    Copyright Lukas Hornych
+    Licensed under the Apache License, Version 2.0
+
+No source code from Hole is distributed as part of this product. The
+attribution above is given because Sandseal's sandbox model — running an AI
+coding agent inside a disposable Docker container with host networking, a
+persistent agent home volume and secrets hidden behind /dev/null bind mounts —
+originates in that project.
