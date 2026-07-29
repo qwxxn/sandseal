@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use chacha20poly1305::{
     ChaCha20Poly1305, KeyInit,
-    aead::{Aead, Nonce, generic_array::GenericArray},
+    aead::{Aead, Nonce, Payload, generic_array::GenericArray},
 };
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -65,19 +65,31 @@ pub fn decrypt(key: &[u8; KEY_SIZE], data: &[u8]) -> Result<Vec<u8>> {
         .map_err(|e| anyhow::anyhow!("decryption failed: {e}"))
 }
 
-pub fn encrypt_with_nonce(key: &[u8; KEY_SIZE], nonce: &[u8; NONCE_SIZE], plaintext: &[u8]) -> Result<Vec<u8>> {
+/// `aad` is authenticated but not encrypted — pass the plaintext frame header so
+/// a tampered header fails the tag instead of being silently accepted.
+pub fn encrypt_with_nonce(
+    key: &[u8; KEY_SIZE],
+    nonce: &[u8; NONCE_SIZE],
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>> {
     let cipher = ChaCha20Poly1305::new(GenericArray::from_slice(key));
     let n = Nonce::<ChaCha20Poly1305>::from_slice(nonce);
 
-    cipher.encrypt(n, plaintext)
+    cipher.encrypt(n, Payload { msg: plaintext, aad })
         .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))
 }
 
-pub fn decrypt_with_nonce(key: &[u8; KEY_SIZE], nonce: &[u8; NONCE_SIZE], ciphertext: &[u8]) -> Result<Vec<u8>> {
+pub fn decrypt_with_nonce(
+    key: &[u8; KEY_SIZE],
+    nonce: &[u8; NONCE_SIZE],
+    ciphertext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>> {
     let cipher = ChaCha20Poly1305::new(GenericArray::from_slice(key));
     let n = Nonce::<ChaCha20Poly1305>::from_slice(nonce);
 
-    cipher.decrypt(n, ciphertext)
+    cipher.decrypt(n, Payload { msg: ciphertext, aad })
         .map_err(|e| anyhow::anyhow!("decryption failed: {e}"))
 }
 
@@ -122,10 +134,21 @@ mod tests {
         let nonce = generate_nonce();
         let plaintext = b"hello with explicit nonce";
 
-        let ciphertext = encrypt_with_nonce(&key, &nonce, plaintext).unwrap();
-        let decrypted = decrypt_with_nonce(&key, &nonce, &ciphertext).unwrap();
+        let ciphertext = encrypt_with_nonce(&key, &nonce, plaintext, b"header").unwrap();
+        let decrypted = decrypt_with_nonce(&key, &nonce, &ciphertext, b"header").unwrap();
 
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn wrong_aad_fails() {
+        let key = hkdf_derive(b"test secret", None, b"test");
+        let nonce = generate_nonce();
+
+        let ciphertext = encrypt_with_nonce(&key, &nonce, b"payload", b"header").unwrap();
+
+        assert!(decrypt_with_nonce(&key, &nonce, &ciphertext, b"tampered").is_err());
+        assert!(decrypt_with_nonce(&key, &nonce, &ciphertext, b"").is_err());
     }
 
     #[test]

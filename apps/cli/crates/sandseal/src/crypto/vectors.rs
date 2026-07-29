@@ -113,8 +113,11 @@ fn chacha20poly1305_roundtrip_matches_vector() {
 
     // Only a roundtrip: the framing around the AEAD output differs between the
     // two implementations, so the ciphertext itself is not a shared fixture.
-    let ciphertext = encrypt::encrypt_with_nonce(&key, &nonce, plaintext.as_bytes()).unwrap();
-    let decrypted = encrypt::decrypt_with_nonce(&key, &nonce, &ciphertext).unwrap();
+    // No associated data here: the fixture pins the cipher itself, and the frame
+    // header that seal() authenticates is not part of this vector.
+    let ciphertext =
+        encrypt::encrypt_with_nonce(&key, &nonce, plaintext.as_bytes(), &[]).unwrap();
+    let decrypted = encrypt::decrypt_with_nonce(&key, &nonce, &ciphertext, &[]).unwrap();
 
     assert_eq!(decrypted, plaintext.as_bytes());
 }
