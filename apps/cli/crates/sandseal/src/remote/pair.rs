@@ -12,6 +12,13 @@ use crate::crypto::pairing::{
     complete_qr_pairing, create_qr_offer, generate_pairing_password, PasswordPairing,
 };
 
+/// Browser's verdict on the verification code, sent once a human has compared it.
+const CONFIRM_ACCEPT: u8 = 0x01;
+const CONFIRM_REJECT: u8 = 0x02;
+
+/// Long enough to walk to another device and read a six-digit code off a screen.
+const CONFIRM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PairSessionResponse {
@@ -168,6 +175,23 @@ pub async fn pair_qr(api_url: Option<&str>) -> Result<()> {
     sink.send(Message::Binary(result.our_signature.to_vec().into()))
         .await
         .context("failed to send signature")?;
+
+    // The signature proves the peer holds the key from the QR payload, but not
+    // that this payload reached the browser from *this* terminal. Only a human
+    // comparing the two codes can tell those apart, so nothing is stored until
+    // the browser reports that someone did.
+    println!("  Waiting for the browser to confirm the code...");
+
+    let confirmation = tokio::time::timeout(CONFIRM_TIMEOUT, recv_binary(&mut source))
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for the browser to confirm"))?
+        .context("the browser disconnected before confirming")?;
+
+    match confirmation.as_slice() {
+        [CONFIRM_ACCEPT] => {}
+        [CONFIRM_REJECT] => bail!("the browser reported that the codes did not match"),
+        _ => bail!("unexpected confirmation from the browser"),
+    }
 
     save_paired_device("browser", &their_identity, &result.shared_secret)?;
 
