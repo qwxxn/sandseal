@@ -4,7 +4,9 @@ Isolated Docker sandboxes for AI coding agents.
 
 Run Claude Code (and other AI agents) in a secure, containerized environment with fine-grained file access control, custom dependencies, and host networking — without touching your host system.
 
-The CLI is free and works entirely offline. There is no telemetry, and no HTTP request leaves it unless you explicitly run `sandseal login`.
+The CLI is free and works entirely offline. There is no telemetry and no update
+check running behind your back — the only commands that touch the network are
+`sandseal login` (plus the online features it unlocks) and `sandseal update`.
 
 ## Quick start
 
@@ -184,7 +186,12 @@ sandseal destroy [path]      Destroy sandbox for a project
 sandseal destroy --all       Destroy all sandboxes
 sandseal status              Show running sandboxes
 sandseal config <cmd>        Manage configuration profiles (see above)
+sandseal update              Upgrade to the latest release
+sandseal update --version X.Y.Z   Install a specific version (also downgrades)
 ```
+
+`sandseal update` runs the same installer as the `curl | bash` one-liner above,
+so it upgrades in place and verifies the download against `SHA256SUMS`.
 
 ## How it works
 
@@ -213,10 +220,14 @@ sandseal.io.
 | hooks, dependencies, service endpoints | `whoami` |
 
 There is no license key and no usage check. The binary holds no credential until
-`sandseal login` writes one, and every network call in the CLI sits behind that
-credential — so on a machine that never logged in, Sandseal makes no outbound
-request at all. Installing and upgrading downloads from GitHub Releases; that is
-the only other time anything is fetched.
+`sandseal login` writes one, and every call carrying your data sits behind that
+credential — so on a machine that never logged in, nothing about your projects
+leaves it.
+
+The one command that reaches the network without an account is `sandseal update`,
+which fetches the installer and the release from GitHub. It runs when you ask it
+to and at no other time: there is no timer, no check at startup, and no ping when
+a sandbox starts.
 
 ### What the backend adds
 

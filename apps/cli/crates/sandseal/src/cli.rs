@@ -44,6 +44,15 @@ pub enum Command {
     Chat(ChatArgs),
     /// Memory bridge used inside the sandbox (MCP server and recall hook)
     Memory(MemoryArgs),
+    /// Update Sandseal to the latest release
+    Update(UpdateArgs),
+}
+
+#[derive(Parser)]
+pub struct UpdateArgs {
+    /// Install a specific version instead of the latest (also downgrades)
+    #[arg(long = "version", value_name = "X.Y.Z")]
+    pub version: Option<String>,
 }
 
 #[derive(Parser)]

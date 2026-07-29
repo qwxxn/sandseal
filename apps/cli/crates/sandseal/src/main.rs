@@ -8,6 +8,7 @@ mod memory;
 mod path;
 mod remote;
 mod sandbox;
+mod update;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -43,6 +44,7 @@ async fn main() -> Result<()> {
         }
         Command::Whoami => whoami()?,
         Command::Memory(args) => memory::run(args).await?,
+        Command::Update(args) => update::run(args).await?,
         Command::Connect(args) => {
             let project_dir = std::fs::canonicalize(&args.path)
                 .context("project directory does not exist")?;
