@@ -36,6 +36,35 @@ pub struct Settings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemorySettings>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gc: Option<GcSettings>,
+}
+
+impl Settings {
+    /// Whether `sandseal start` sweeps abandoned sandboxes before starting one.
+    ///
+    /// Opt-out: an abandoned sandbox is a container still running an agent, so leaving one
+    /// behind is the outcome that needs asking for, not the other way round.
+    pub fn gc_on_start(&self) -> bool {
+        self.gc
+            .as_ref()
+            .and_then(|gc| gc.on_start)
+            .unwrap_or(true)
+    }
+}
+
+/// When the collector runs on its own.
+///
+/// Only `onStart` exists so far — `sandseal gc` is explicit and always runs — but it is nested
+/// from the start for the same reason `memory.scope` is: moving a flattened key later breaks
+/// every settings file that already uses it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GcSettings {
+    /// Sweep before starting a sandbox. Defaults to true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_start: Option<bool>,
 }
 
 /// Memory configuration for this sandbox.
@@ -150,4 +179,23 @@ pub struct NetworkSettings {
 pub struct DockerSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passthrough: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(json: serde_json::Value) -> Settings {
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn the_start_sweep_is_on_unless_someone_turns_it_off() {
+        // Opt-out: settings that say nothing, and settings with an unrelated `gc` shape,
+        // both sweep. Only an explicit false does not.
+        assert!(parse(serde_json::json!({})).gc_on_start());
+        assert!(parse(serde_json::json!({"gc": {}})).gc_on_start());
+        assert!(parse(serde_json::json!({"gc": {"onStart": true}})).gc_on_start());
+        assert!(!parse(serde_json::json!({"gc": {"onStart": false}})).gc_on_start());
+    }
 }

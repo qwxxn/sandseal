@@ -140,6 +140,12 @@ mod tests {
     }
 
     #[test]
+    fn accepts_turning_the_start_sweep_off() {
+        assert!(validate_value(serde_json::json!({"gc": {"onStart": false}})).is_ok());
+        assert!(schema_knows_path(&schema(), "gc.onStart"));
+    }
+
+    #[test]
     fn rejects_a_project_name_the_server_would_refuse() {
         // Same pattern the memory service enforces. Catching it here means a bad name fails
         // at `config edit`, not silently at the next session when the scope drops to null.
