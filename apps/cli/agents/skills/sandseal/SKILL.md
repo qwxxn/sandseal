@@ -217,6 +217,26 @@ project either way, so attribution survives regardless.
 Both keys live under `memory.scope`, not directly under `memory` — the rest of the memory
 settings arrive alongside `scope`, not inside it.
 
+### `gc.onStart` — cleaning up abandoned sandboxes
+
+```json
+{ "gc": { "onStart": false } }
+```
+
+A sandbox is torn down when its CLI exits, including when the terminal that runs it is closed.
+What that cannot cover is `kill -9` or a machine losing power, so by default `sandseal start`
+first sweeps: any sandbox whose CLI is gone is taken down, along with containers from sessions
+that already ended. Set `onStart` to `false` to skip that sweep.
+
+**A sandbox someone is using is never swept, whatever this is set to.** A running CLI holds a
+lock on its instance record in `~/.sandseal/instances/`, and locked records are skipped — that
+is a lock the kernel releases only when the process really is gone. Containers without the
+`sandseal.project_name` label are outside the sweep entirely, so nothing else on the machine is
+at risk.
+
+Turn it off only if you deliberately keep sandboxes running with no CLI attached. `sandseal gc`
+(and `sandseal gc --dry-run`) work either way.
+
 ## Which command applies the change
 
 | Changed | Needed |
@@ -235,6 +255,7 @@ Useful commands to hand the user, all run **on the host**:
 | `sandseal start --profile <name>` / `--no-profile` | override the active profile for one run |
 | `sandseal build [path]` | rebuild the image without starting |
 | `sandseal destroy` | remove this project's sandbox |
+| `sandseal gc` / `--dry-run` | clean up sandboxes left behind by a killed CLI |
 
 Failures are loud on purpose: a missing profile aborts the start rather than silently
 dropping its restrictions, and an unknown `$replace` path is an error.

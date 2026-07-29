@@ -106,8 +106,15 @@ already ended. `sandseal gc` runs the same sweep on demand, `sandseal gc --dry-r
 reports it, and `sandseal status` says how many abandoned sandboxes it can see.
 
 The sweep never touches a sandbox someone is using: a running CLI holds its record's lock, and
-a locked record is skipped. Containers started by a Sandseal older than instance records have
-no record at all — those are left alone while running, and removed once they stop.
+a locked record is skipped. Nor does it touch anything without the `sandseal.project_name`
+label, so the rest of what runs on your machine is outside its reach. Containers started by a
+Sandseal older than instance records have no record at all — those are left alone while
+running, and removed once they stop.
+
+The sweep on `sandseal start` is opt-out. `{"gc": {"onStart": false}}` in settings leaves it to
+`sandseal gc`, which is worth setting only if you deliberately keep sandboxes running with no
+CLI attached — detaching one properly (tmux, `nohup`) keeps its process, and therefore its
+lock, alive, so it survives the sweep either way.
 
 **System packages do not survive an image rebuild.** Anything you `apt install` inside a running
 sandbox applies to that instance only; put it in `dependencies` to make it permanent.

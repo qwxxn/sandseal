@@ -157,10 +157,6 @@ pub struct StartedSandbox {
 }
 
 pub async fn start(args: StartArgs) -> Result<()> {
-    // Before anything is started, not after: a sandbox left over from a killed CLI is still
-    // running an agent, and this is the moment someone is here to notice.
-    collect_dead_sandboxes().await;
-
     let started = prepare_and_launch(&args).await?;
 
     // Beats until the sandbox ends. Without it the backend cannot tell a session that is
@@ -189,9 +185,16 @@ pub async fn start(args: StartArgs) -> Result<()> {
     Ok(())
 }
 
-/// The sweep `start` runs on the way in. Quiet unless it actually found something, because
-/// most of the time it will not.
-async fn collect_dead_sandboxes() {
+/// The sweep `start` runs on the way in — a sandbox left over from a killed CLI is still
+/// running an agent, and this is the moment someone is here to notice.
+///
+/// Quiet unless it found something, because most of the time it will not.
+async fn collect_dead_sandboxes(settings: &Settings) {
+    if !settings.gc_on_start() {
+        debug!("gc.onStart is off, leaving abandoned sandboxes alone");
+        return;
+    }
+
     let report = gc::sweep(false).await;
     if !report.is_empty() {
         println!("  {}", report.summary());
@@ -241,6 +244,10 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     // Load and merge settings
     let profile_choice = ProfileChoice::from_flags(args.profile.as_deref(), args.no_profile);
     let settings = load_settings(&project_dir, &profile_choice)?;
+
+    // Before any of the expensive work, and before this sandbox has a container of its own
+    // that the sweep would have to reason about.
+    collect_dead_sandboxes(&settings).await;
 
     // Run setupHost hooks
     if let Some(hooks_cfg) = &settings.hooks {

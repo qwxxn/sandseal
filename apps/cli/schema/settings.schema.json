@@ -227,6 +227,18 @@
         }
       },
       "description": "Memory configuration for this sandbox."
+    },
+    "gc": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "onStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether `sandseal start` first cleans up sandboxes left behind by a CLI that was killed, and containers from sessions that already ended. Default true. A sandbox someone is still using is never touched — a running CLI holds a lock on its instance record, and locked records are skipped. Turn this off only if you deliberately keep sandboxes running with no CLI attached; `sandseal gc` still works either way."
+        }
+      },
+      "description": "When the collector for abandoned sandboxes runs on its own."
     }
   }
 }
