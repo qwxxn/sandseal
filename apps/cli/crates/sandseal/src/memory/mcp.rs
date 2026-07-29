@@ -281,6 +281,26 @@ mod tests {
     }
 
     #[test]
+    fn instructions_tell_the_agent_to_search_and_save_unprompted() {
+        // Recall only matches the prompt's wording, so everything the user did not name is
+        // reached by the agent searching on its own. Guidance that reads as "search when
+        // asked" turns memory into a feature nobody remembers to use.
+        let instructions = initialize_result(&json!({}))["instructions"].as_str().unwrap().to_string();
+        assert!(
+            instructions.contains("without being asked"),
+            "search guidance must be proactive"
+        );
+        assert!(
+            instructions.contains("Save without being asked"),
+            "save guidance must be proactive"
+        );
+        assert!(
+            instructions.contains("Cross-project") && instructions.contains("Business context"),
+            "the two categories the repository cannot supply must be named explicitly"
+        );
+    }
+
+    #[test]
     fn instructions_frame_recalled_notes_as_untrusted() {
         // The hook renders notes into the prompt on its own, so the handshake has to explain
         // what that block is — otherwise a poisoned note reads as a standing order.
