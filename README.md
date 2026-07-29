@@ -206,6 +206,10 @@ Sandseal generates a Docker Compose configuration on the fly:
 
 The agent runs as a non-root user with UID matching your host user, so file permissions work seamlessly.
 
+For the complete inventory — every file Sandseal reads or writes, every Docker resource it
+creates, every mount inside the container, and what it deliberately does *not* touch — see
+[what Sandseal touches](apps/cli/docs/what-sandseal-touches.md).
+
 ## Account and online features
 
 Sandseal needs no account. Everything documented above — the sandbox, file access
@@ -268,6 +272,7 @@ sandseal/
 │   │   ├── Dockerfile.base
 │   │   └── claude/       Claude Code agent
 │   ├── schema/           JSON Schema for settings
+│   ├── docs/             What Sandseal touches on your machine
 │   └── Cargo.toml
 └── scripts/              install.sh, uninstall.sh
 ```
