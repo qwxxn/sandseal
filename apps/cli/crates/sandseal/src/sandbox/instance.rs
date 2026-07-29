@@ -9,7 +9,8 @@ use crate::config::load::{self, ProfileChoice};
 use crate::config::Settings;
 use crate::docker::{build, compose, image, runtime};
 use crate::sandbox::cleanup::{register_signal_handler, CleanupGuard};
-use crate::sandbox::hooks;
+use crate::sandbox::registry::{self, InstanceRecord};
+use crate::sandbox::{gc, heartbeat, hooks};
 
 /// The agent CLI baked into the sandbox image. Only Claude Code is supported today.
 const AGENT: &str = "claude";
@@ -156,26 +157,45 @@ pub struct StartedSandbox {
 }
 
 pub async fn start(args: StartArgs) -> Result<()> {
+    // Before anything is started, not after: a sandbox left over from a killed CLI is still
+    // running an agent, and this is the moment someone is here to notice.
+    collect_dead_sandboxes().await;
+
     let started = prepare_and_launch(&args).await?;
-    let memory_session_id = started.memory_session_id.clone();
+
+    // Beats until the sandbox ends. Without it the backend cannot tell a session that is
+    // still going from one whose CLI was killed hours ago.
+    let heartbeat = started
+        .memory_session_id
+        .clone()
+        .map(|id| heartbeat::spawn(args.api_url.clone(), id));
 
     // Local mode: attach interactively
     runtime::wait_and_attach(&started.container_name).await?;
 
+    if let Some(task) = heartbeat {
+        task.abort();
+    }
+
     suggest_runtime_packages(&started.project_dir, &crate::config::Settings::default());
 
+    // Tears the sandbox down and closes the session, which revokes the memory credential
+    // straight away — a token left in a stopped container is worth nothing.
     {
         let mut guard = started.guard.lock().unwrap();
         guard.cleanup();
     }
 
-    // Closing the session revokes the memory credential straight away, so a token left in a
-    // stopped container is worth nothing.
-    if let Some(id) = memory_session_id {
-        crate::memory::session::close(args.api_url.as_deref(), &id).await;
-    }
-
     Ok(())
+}
+
+/// The sweep `start` runs on the way in. Quiet unless it actually found something, because
+/// most of the time it will not.
+async fn collect_dead_sandboxes() {
+    let report = gc::sweep(false).await;
+    if !report.is_empty() {
+        println!("  {}", report.summary());
+    }
 }
 
 pub async fn start_remote(args: &StartArgs) -> Result<StartedSandbox> {
@@ -327,12 +347,35 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         .cloned()
         .unwrap_or_default();
 
-    let guard = Arc::new(Mutex::new(CleanupGuard::new(
+    let mut cleanup = CleanupGuard::new(
         compose_cmd.clone(),
         cleanup_hooks,
         project_dir.clone(),
         tmp_path.to_path_buf(),
-    )));
+    );
+
+    let memory_session_id = memory.map(|m| m.id);
+    if let Some(id) = &memory_session_id {
+        cleanup.closing_session(args.api_url.clone(), id.clone());
+    }
+
+    // Claimed before the container exists, so there is no window in which a running sandbox
+    // has no record. A failed `compose up` drops the claim through the guard.
+    match registry::claim(&InstanceRecord {
+        instance_name: instance_name.clone(),
+        project_dir: project_dir.clone(),
+        tmp_dir: tmp_path.to_path_buf(),
+        session_id: memory_session_id.clone(),
+        api_url: args.api_url.clone(),
+        started_at: unix_time(),
+    }) {
+        Ok(claim) => cleanup.holding(claim),
+        // Not fatal. Losing the record costs this sandbox its place in the collector's list,
+        // which is worth far less than the sandbox itself.
+        Err(err) => tracing::warn!("sandbox will not be tracked for cleanup: {err}"),
+    }
+
+    let guard = Arc::new(Mutex::new(cleanup));
 
     register_signal_handler(Arc::clone(&guard));
 
@@ -348,8 +391,15 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         container_name,
         project_dir,
         guard,
-        memory_session_id: memory.map(|m| m.id),
+        memory_session_id,
     })
+}
+
+fn unix_time() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
 }
 
 /// Build (or rebuild) the sandbox image for a project without starting a container.
@@ -530,6 +580,32 @@ pub fn status() -> Result<()> {
         println!("no running sandboxes");
     } else {
         println!("{stdout}");
+    }
+
+    // Reports without touching a container: `status` tells you, `gc` acts. Worth saying
+    // because a sandbox whose CLI is gone keeps running and looks perfectly healthy above.
+    let abandoned = registry::orphans().len();
+    if abandoned > 0 {
+        println!("{abandoned} sandbox(es) have no CLI attached. Run `sandseal gc` to clean up.");
+    }
+
+    Ok(())
+}
+
+/// Explicit run of the collector `start` runs quietly.
+pub async fn collect_garbage(args: crate::cli::GcArgs) -> Result<()> {
+    let report = gc::sweep(args.dry_run).await;
+
+    for instance in &report.reaped {
+        println!("  {} {instance}", if args.dry_run { "would reap" } else { "reaped" });
+    }
+
+    if report.is_empty() {
+        println!("  Nothing to clean up.");
+    } else if args.dry_run {
+        println!("  {} (dry run — nothing was touched)", report.summary());
+    } else {
+        println!("  {}", report.summary());
     }
 
     Ok(())

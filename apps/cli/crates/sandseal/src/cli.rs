@@ -28,6 +28,8 @@ pub enum Command {
     Destroy(DestroyArgs),
     /// Show running sandbox instances
     Status,
+    /// Clean up sandboxes left behind by a CLI that was killed
+    Gc(GcArgs),
     /// Manage named configuration profiles
     Config(ConfigArgs),
     /// Log in to Sandseal via browser
@@ -46,6 +48,13 @@ pub enum Command {
     Memory(MemoryArgs),
     /// Update Sandseal to the latest release
     Update(UpdateArgs),
+}
+
+#[derive(Parser)]
+pub struct GcArgs {
+    /// Report what would be cleaned up without touching anything
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Parser)]

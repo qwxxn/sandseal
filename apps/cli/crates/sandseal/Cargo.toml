@@ -38,7 +38,9 @@ shellexpand = "3"
 # Process / signals
 nix = { version = "0.29", features = ["signal", "process", "user", "term", "fs"] }
 libc = "0.2"
-ctrlc = "3"
+# `termination` adds SIGTERM and SIGHUP to the handler. Without it, closing the terminal kills
+# the CLI outright and the sandbox it started keeps running with nobody attached.
+ctrlc = { version = "3", features = ["termination"] }
 
 # Hashing
 sha1 = "0.10"
