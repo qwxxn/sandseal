@@ -185,6 +185,8 @@ sandseal start --no-profile  Ignore the active profile for this run
 sandseal destroy [path]      Destroy sandbox for a project
 sandseal destroy --all       Destroy all sandboxes
 sandseal status              Show running sandboxes
+sandseal gc                  Clean up sandboxes left behind by a killed CLI
+sandseal gc --dry-run        Report what gc would clean up
 sandseal config <cmd>        Manage configuration profiles (see above)
 sandseal update              Upgrade to the latest release
 sandseal update --version X.Y.Z   Install a specific version (also downgrades)

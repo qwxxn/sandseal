@@ -32,6 +32,7 @@ async fn main() -> Result<()> {
         Command::Build(args) => instance::build(args)?,
         Command::Destroy(args) => instance::destroy(args)?,
         Command::Status => instance::status()?,
+        Command::Gc(args) => instance::collect_garbage(args).await?,
         Command::Config(args) => config::commands::run(args)?,
         Command::Login(args) => {
             auth::device_flow::login(args.api_url.as_deref()).await?;
@@ -84,18 +85,26 @@ async fn main() -> Result<()> {
                 .json()
                 .await?;
 
+            let session_id = resp["id"].as_str()
+                .context("missing id in response")?.to_string();
             let relay_url = resp["relayUrl"].as_str()
                 .context("missing relayUrl in response")?.to_string();
             let relay_token = resp["relayToken"].as_str()
                 .context("missing relayToken in response")?.to_string();
 
-            remote::chat::bridge_chat(
+            let chatted = remote::chat::bridge_chat(
                 &project_dir.to_string_lossy(),
                 &args.prompt,
                 relay_url,
                 relay_token,
             )
-            .await?;
+            .await;
+
+            // A one-shot prompt still opens a session, and one nobody closes is
+            // indistinguishable from a sandbox that is still running.
+            memory::session::close(args.api_url.as_deref(), &session_id).await;
+
+            chatted?;
         }
     }
 
@@ -140,15 +149,25 @@ async fn start_remote(args: cli::StartArgs) -> Result<()> {
     println!("  Open dashboard to connect.");
     println!();
 
-    remote::bridge::bridge_container(
+    let heartbeat = sandbox::heartbeat::spawn(args.api_url.clone(), session_id.to_string());
+
+    let bridged = remote::bridge::bridge_container(
         &started.container_name,
         relay_url,
         relay_token,
     )
-    .await?;
+    .await;
+
+    heartbeat.abort();
+    // Closed whether or not the bridge ended cleanly: a session nobody ends stays "running"
+    // for good, and its memory credential with it.
+    memory::session::close(args.api_url.as_deref(), session_id).await;
+
+    bridged?;
 
     println!("  Session ended.");
 
+    // Also closes the memory session and drops the instance record — see CleanupGuard.
     let mut guard = started.guard.lock().unwrap();
     guard.cleanup();
 

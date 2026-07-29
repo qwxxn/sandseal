@@ -25,6 +25,7 @@ changes you review with `git diff`.
 | `profiles/<name>.json` | `sandseal config` | Named settings presets you can switch between per project. |
 | `state.json` | `sandseal config use` | Which profile is active machine-wide. Machine-local. |
 | `tmp/<random>/` | `sandseal start` | Per-instance scratch: the generated compose override, rendered memory config, prestart scripts, and placeholder directories used to mask excluded paths. One directory per sandbox run. |
+| `instances/<instance>.json` | `sandseal start` | One record per running sandbox — which containers, tmp dir and session belong to it. The CLI holds an exclusive `flock` on it while the sandbox runs, so a record whose lock is free identifies a sandbox whose CLI is gone. Deleted on a clean exit, collected by `sandseal gc` otherwise. |
 | `keys/identity.key`, `keys/identity.pub` | `sandseal pair` / `connect` | Keypair identifying this machine to the dashboard for end-to-end encrypted remote sessions. Created on first use of a remote feature, not at install time. |
 
 Only `settings.json` is created up front. The rest appear when you first use the feature that
@@ -90,11 +91,23 @@ That is expected, and it is the only thing Sandseal writes outside its own direc
 | Container | `sandseal-sandbox-<project>-<hash>-<instance>-agent-1` | One per running sandbox. |
 | Volume | `…_sandseal-agent-home` | Agent home. Persists CLI logins, installed user-level tools, `~/.cargo`, `~/.local`. Survives container restarts. |
 | Volume | `…_sandseal-apt-cache` | Shared apt cache, so repeated installs are fast. |
-| Labels | `sandseal.project_name`, `sandseal.project_dir`, `sandseal.instance_name` | How `sandseal status` and `sandseal destroy` find instances. |
+| Labels | `sandseal.project_name`, `sandseal.project_dir`, `sandseal.instance_name` | How `sandseal status`, `sandseal destroy` and `sandseal gc` find instances. |
 
 `sandseal destroy` removes a project's sandboxes; `sandseal destroy --all` removes every one on
 the machine. Volumes persist by design — that is what makes an agent's login and installed
 tooling survive a restart.
+
+**Containers do not outlive the CLI.** A sandbox is torn down when you exit it, and also when
+the CLI is signalled — closing the terminal sends SIGHUP, which stops the container instead of
+killing the CLI and leaving it running. What that cannot cover is `kill -9` or a machine that
+loses power, so `sandseal start` also sweeps first: any sandbox whose instance record is
+unlocked has no CLI behind it and is taken down, along with containers from sessions that
+already ended. `sandseal gc` runs the same sweep on demand, `sandseal gc --dry-run` only
+reports it, and `sandseal status` says how many abandoned sandboxes it can see.
+
+The sweep never touches a sandbox someone is using: a running CLI holds its record's lock, and
+a locked record is skipped. Containers started by a Sandseal older than instance records have
+no record at all — those are left alone while running, and removed once they stop.
 
 **System packages do not survive an image rebuild.** Anything you `apt install` inside a running
 sandbox applies to that instance only; put it in `dependencies` to make it permanent.
