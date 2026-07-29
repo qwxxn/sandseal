@@ -35,3 +35,6 @@ internal-docs/
 
 # per-project sandbox config — may hold credentials passed into the sandbox
 .sandseal/
+
+# fallow analysis cache
+.fallow/
