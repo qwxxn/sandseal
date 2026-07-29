@@ -60,8 +60,17 @@ fn mcp_config_json() -> serde_json::Value {
     })
 }
 
+/// `autoMemoryEnabled: false` turns off Claude Code's own file-based memory, which is on by
+/// default and would otherwise run alongside ours: a second set of memory instructions in the
+/// system prompt, telling the agent to write notes into `~/.claude/projects/<cwd>/memory/` —
+/// inside the agent home volume, where nothing reads them back and no scope applies.
+///
+/// It is switched off here, in the file rendered only when our memory is actually on, rather
+/// than unconditionally. Without a subscription the built-in memory is the only memory the
+/// sandbox has, and taking it away would leave the user with less than they started with.
 fn settings_json() -> serde_json::Value {
     json!({
+        "autoMemoryEnabled": false,
         "hooks": {
             "UserPromptSubmit": [
                 { "hooks": [{ "type": "command", "command": RECALL_COMMAND }] }
@@ -101,6 +110,13 @@ mod tests {
             settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
             RECALL_COMMAND
         );
+    }
+
+    #[test]
+    fn settings_turn_off_the_agents_own_file_memory() {
+        // Two memory systems in one sandbox means two sets of instructions and notes written
+        // into the agent home where nothing reads them back.
+        assert_eq!(settings_json()["autoMemoryEnabled"], false);
     }
 
     #[test]
