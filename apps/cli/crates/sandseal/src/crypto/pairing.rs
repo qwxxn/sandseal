@@ -9,10 +9,14 @@ use crate::crypto::encrypt;
 use crate::crypto::keys::{IdentityKeyPair, X25519KeyPair};
 
 /// QR pairing payload — encoded into QR code by CLI, scanned by browser.
+///
+/// Deliberately carries no verification code. A code that can be derived before
+/// the key exchange comes from public values, so a man-in-the-middle substituting
+/// its own ephemeral key simply derives a matching one. The only meaningful code
+/// is the one in `PairingResult`, computed from the shared secret.
 #[derive(Debug)]
 pub struct QrPairingOffer {
     pub ephemeral_public: [u8; 32],
-    pub verification_code: String,
     pub identity_public: [u8; 32],
 }
 
@@ -20,12 +24,8 @@ impl QrPairingOffer {
     pub fn to_url(&self, base_url: &str) -> String {
         let eph = BASE64URL.encode(self.ephemeral_public);
         let id = BASE64URL.encode(self.identity_public);
-        format!(
-            "{base_url}/pair?eph={eph}&id={id}&code={}",
-            self.verification_code
-        )
+        format!("{base_url}/pair?eph={eph}&id={id}")
     }
-
 }
 
 /// Generate a 6-digit verification code from shared secret.
@@ -39,12 +39,8 @@ pub fn derive_verification_code(shared_secret: &[u8]) -> String {
 pub fn create_qr_offer(identity: &IdentityKeyPair) -> (QrPairingOffer, X25519KeyPair) {
     let ephemeral = X25519KeyPair::generate();
 
-    let preview_secret = Sha256::digest(ephemeral.public.as_bytes());
-    let code = derive_verification_code(&preview_secret);
-
     let offer = QrPairingOffer {
         ephemeral_public: *ephemeral.public.as_bytes(),
-        verification_code: code,
         identity_public: identity.public_key_bytes(),
     };
 
@@ -142,7 +138,10 @@ mod tests {
 
         let url = offer.to_url("https://app.sandseal.io");
         assert!(url.starts_with("https://app.sandseal.io/pair?"));
-        assert!(url.contains(&offer.verification_code));
+        assert!(url.contains(&BASE64URL.encode(offer.identity_public)));
+
+        // A code in the URL would predate the key exchange and prove nothing.
+        assert!(!url.contains("code="));
     }
 
     #[test]

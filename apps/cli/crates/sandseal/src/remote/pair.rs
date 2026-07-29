@@ -130,8 +130,6 @@ pub async fn pair_qr(api_url: Option<&str>) -> Result<()> {
     println!("  Open in browser:");
     println!("  {pair_url}");
     println!();
-    println!("  Verification code: {}", offer.verification_code);
-    println!();
     println!("  Waiting for browser to connect...");
 
     let (mut sink, mut source) = connect_relay(&session.relay_url, &session.relay_token).await?;
@@ -161,7 +159,10 @@ pub async fn pair_qr(api_url: Option<&str>) -> Result<()> {
     let result = complete_qr_pairing(&identity, &ephemeral, &their_eph, &their_identity)?;
 
     println!("  Browser connected!");
-    println!("  Verification: {}", result.verification_code);
+    println!();
+    println!("  Verification code: {}", result.verification_code);
+    println!("  Check that the browser shows the same code before continuing.");
+    println!();
 
     // Send our signature of their identity key (proves we hold our private key)
     sink.send(Message::Binary(result.our_signature.to_vec().into()))

@@ -99,11 +99,18 @@ impl SessionKeys {
     /// Encrypt a message into a framed packet.
     pub fn seal(&mut self, msg_type: MessageType, plaintext: &[u8]) -> Result<Vec<u8>> {
         let nonce = encrypt::generate_nonce();
-        let ciphertext = encrypt::encrypt_with_nonce(&self.send_key, &nonce, plaintext)?;
+
+        // Header is authenticated as associated data. Without it an attacker can
+        // flip the type byte — Data into Close, say — without breaking the tag.
+        let mut header = [0u8; FRAME_HEADER_SIZE];
+        header[0] = msg_type as u8;
+        header[1..].copy_from_slice(&self.send_seq.to_be_bytes());
+
+        let ciphertext =
+            encrypt::encrypt_with_nonce(&self.send_key, &nonce, plaintext, &header)?;
 
         let mut frame = Vec::with_capacity(FRAME_HEADER_SIZE + NONCE_SIZE + ciphertext.len());
-        frame.push(msg_type as u8);
-        frame.extend_from_slice(&self.send_seq.to_be_bytes());
+        frame.extend_from_slice(&header);
         frame.extend_from_slice(&nonce);
         frame.extend_from_slice(&ciphertext);
 
@@ -131,8 +138,13 @@ impl SessionKeys {
         let mut nonce = [0u8; NONCE_SIZE];
         nonce.copy_from_slice(&frame[nonce_start..nonce_end]);
 
+        // The bytes as received, not as re-encoded from the parsed values — that
+        // is what makes a modified header fail the tag.
+        let header = &frame[..FRAME_HEADER_SIZE];
+
         let ciphertext = &frame[nonce_end..];
-        let plaintext = encrypt::decrypt_with_nonce(&self.recv_key, &nonce, ciphertext)?;
+        let plaintext =
+            encrypt::decrypt_with_nonce(&self.recv_key, &nonce, ciphertext, header)?;
 
         self.recv_seq = self.recv_seq.wrapping_add(1);
         self.recv_count += 1;
@@ -230,6 +242,46 @@ mod tests {
 
         // Skip f1, try to open f2 — should fail on seq mismatch
         assert!(bob.open(&f2).is_err());
+    }
+
+    /// The header travels in the clear, so the AEAD tag is the only thing that
+    /// makes it tamper-evident. Before it was passed as associated data, an
+    /// attacker on the relay could rewrite the type byte and the frame still
+    /// opened — turning a Data message into a Close, for instance.
+    #[test]
+    fn tampered_message_type_is_rejected() {
+        let (mut alice, mut bob) = make_session_pair();
+        let mut frame = alice.seal(MessageType::Data, b"payload").unwrap();
+
+        frame[0] = MessageType::Close as u8;
+
+        assert!(bob.open(&frame).is_err());
+    }
+
+    /// Every type substitution an attacker might want, not just one.
+    #[test]
+    fn no_message_type_can_be_substituted() {
+        for forged in [
+            MessageType::Data,
+            MessageType::KeyRotation,
+            MessageType::Ping,
+            MessageType::Pong,
+            MessageType::Close,
+            MessageType::Resize,
+        ] {
+            let (mut alice, mut bob) = make_session_pair();
+            let mut frame = alice.seal(MessageType::Data, b"payload").unwrap();
+
+            if forged == MessageType::Data {
+                continue; // not a substitution
+            }
+            frame[0] = forged as u8;
+
+            assert!(
+                bob.open(&frame).is_err(),
+                "type {forged:?} was accepted in place of Data"
+            );
+        }
     }
 
     #[test]
