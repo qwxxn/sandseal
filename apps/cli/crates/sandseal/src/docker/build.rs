@@ -2,8 +2,14 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use tracing::debug;
 
-/// Assemble the base image build context: entrypoint, apt-wrapper, agent installs.
-pub fn assemble_base_context(script_dir: &Path, ctx_dir: &Path, agent: &str) -> Result<()> {
+/// Assemble the base image build context: entrypoint, apt-wrapper, agent installs
+/// and the machine-wide setup hook.
+pub fn assemble_base_context(
+    script_dir: &Path,
+    ctx_dir: &Path,
+    agent: &str,
+    setup_script: Option<&Path>,
+) -> Result<()> {
     let agents = script_dir.join("agents");
 
     copy_file(&agents.join("entrypoint.sh"), &ctx_dir.join("entrypoint.sh"))?;
@@ -16,12 +22,12 @@ pub fn assemble_base_context(script_dir: &Path, ctx_dir: &Path, agent: &str) -> 
         debug!("copied agent installs to {}", agent_dst.display());
     }
 
-    Ok(())
+    assemble_setup_scripts(ctx_dir, setup_script)
 }
 
-/// Assemble the overlay image build context: the optional setup hook script.
-/// The `setup-scripts/` dir must always exist for the COPY in Dockerfile.overlay.
-pub fn assemble_overlay_context(ctx_dir: &Path, setup_script: Option<&Path>) -> Result<()> {
+/// Place the optional setup hook script in a build context. The `setup-scripts/` dir must
+/// always exist, hook or not, for the COPY in both Dockerfiles.
+pub fn assemble_setup_scripts(ctx_dir: &Path, setup_script: Option<&Path>) -> Result<()> {
     let setup_dir = ctx_dir.join("setup-scripts");
     std::fs::create_dir_all(&setup_dir)?;
     std::fs::write(setup_dir.join(".gitkeep"), "")?;
