@@ -14,8 +14,8 @@ ARG AGENT_HOME=/home/agent
 RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
 
 # Project-agnostic base image. Shared across all projects with identical inputs
-# (base image, user, agent installs). Project-specific dependencies and the setup
-# hook live in Dockerfile.overlay, built FROM this image.
+# (base image, user, agent installs, machine-wide dependencies and setup hook). Only what
+# a project adds on top of those lives in Dockerfile.overlay, built FROM this image.
 
 # Latest package versions / agent releases are pulled fresh whenever CACHEBUST changes.
 ARG CACHEBUST=1
@@ -100,8 +100,29 @@ RUN chmod +x /usr/local/bin/apt-get
 COPY entrypoint.sh /tmp/entrypoint.sh
 RUN chmod +x /tmp/entrypoint.sh
 
-USER ${AGENT_USERNAME}
-
 ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
+
+# Everything below comes from settings the project did not touch, so it is the same for every
+# project on this machine and is installed here once instead of in each project's overlay.
+# It sits last on purpose: changing it leaves the layers above cached.
+
+## Machine-wide dependencies
+# Call the real apt-get directly (not the /usr/local/bin wrapper) so these build-time
+# installs are not logged as runtime packages.
+ARG SHARED_PACKAGES=""
+RUN if [ -n "$SHARED_PACKAGES" ]; then \
+      /usr/bin/apt-get update && /usr/bin/apt-get install -y --no-install-recommends $SHARED_PACKAGES \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+## Machine-wide setup hook (runs as root — can install system packages, configure locales, etc.)
+COPY setup-scripts/ /tmp/setup-scripts/
+RUN if [ -f /tmp/setup-scripts/setup.sh ]; then \
+      chmod +x /tmp/setup-scripts/setup.sh && \
+      /tmp/setup-scripts/setup.sh; \
+    fi
+RUN rm -rf /tmp/setup-scripts
+
+USER ${AGENT_USERNAME}
 
 ENTRYPOINT ["/tmp/entrypoint.sh"]

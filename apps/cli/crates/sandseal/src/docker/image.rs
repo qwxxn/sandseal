@@ -9,6 +9,19 @@ use crate::docker::build;
 
 const REPO_PREFIX: &str = "sandseal-sandbox/agent";
 
+/// Extra apt packages and a setup hook, baked into one image layer.
+#[derive(Default)]
+pub struct Payload<'a> {
+    pub dependencies: &'a [String],
+    pub setup_script: Option<&'a Path>,
+}
+
+impl Payload<'_> {
+    fn is_empty(&self) -> bool {
+        self.dependencies.is_empty() && self.setup_script.is_none()
+    }
+}
+
 /// Everything that determines which image(s) a sandbox needs.
 pub struct ImageSpec<'a> {
     pub agent: &'a str,
@@ -18,31 +31,28 @@ pub struct ImageSpec<'a> {
     pub gid: u32,
     pub username: &'a str,
     pub home: &'a str,
-    pub dependencies: &'a [String],
-    pub setup_script: Option<&'a Path>,
+    /// Machine-wide, from settings this project did not touch. Goes into the base image,
+    /// so it is installed once for every project instead of once per project.
+    pub shared: Payload<'a>,
+    /// What this project adds on top. Goes into its own overlay.
+    pub project: Payload<'a>,
     pub script_dir: &'a Path,
     pub rebuild: bool,
-}
-
-impl ImageSpec<'_> {
-    fn needs_overlay(&self) -> bool {
-        !self.dependencies.is_empty() || self.setup_script.is_some()
-    }
 }
 
 /// Ensure the images this project needs exist, building only what's missing.
 /// Returns the image tag the sandbox should run.
 ///
 /// The base image is project-agnostic and shared across every project with the
-/// same inputs (base image, user, agent installs) — so rebuilding it updates all
-/// of them at once. A thin per-project overlay is only built when the project
-/// defines extra dependencies or a setup hook.
+/// same inputs (base image, user, agent installs, machine-wide payload) — so rebuilding
+/// it updates all of them at once. A thin per-project overlay is only built when the
+/// project itself adds dependencies or a setup hook.
 pub fn ensure_images(spec: &ImageSpec) -> Result<String> {
     let base_tag = ensure_base(spec)?;
-    if spec.needs_overlay() {
-        ensure_overlay(spec, &base_tag)
-    } else {
+    if spec.project.is_empty() {
         Ok(base_tag)
+    } else {
+        ensure_overlay(spec, &base_tag)
     }
 }
 
@@ -55,6 +65,10 @@ fn ensure_base(spec: &ImageSpec) -> Result<String> {
     hasher.update(spec.gid.to_le_bytes());
     hash_str(&mut hasher, spec.username);
     hash_str(&mut hasher, spec.home);
+    hash_str(&mut hasher, &spec.shared.dependencies.join(" "));
+    if let Some(setup) = spec.shared.setup_script {
+        hash_path(&mut hasher, setup)?;
+    }
     hash_path(&mut hasher, &agents_dir.join("Dockerfile.base"))?;
     hash_path(&mut hasher, &agents_dir.join("entrypoint.sh"))?;
     hash_path(&mut hasher, &agents_dir.join("apt-wrapper.sh"))?;
@@ -69,7 +83,7 @@ fn ensure_base(spec: &ImageSpec) -> Result<String> {
 
     info!("building base image {tag}");
     let ctx = make_context_dir()?;
-    build::assemble_base_context(spec.script_dir, ctx.path(), spec.agent)?;
+    build::assemble_base_context(spec.script_dir, ctx.path(), spec.agent, spec.shared.setup_script)?;
 
     let mut args = vec![
         ("BASE_IMAGE", spec.base_image.to_string()),
@@ -77,6 +91,7 @@ fn ensure_base(spec: &ImageSpec) -> Result<String> {
         ("GID", spec.gid.to_string()),
         ("AGENT_USERNAME", spec.username.to_string()),
         ("AGENT_HOME", spec.home.to_string()),
+        ("SHARED_PACKAGES", spec.shared.dependencies.join(" ")),
     ];
     if spec.rebuild {
         args.push(("CACHEBUST", cachebust()));
@@ -86,10 +101,15 @@ fn ensure_base(spec: &ImageSpec) -> Result<String> {
 }
 
 fn ensure_overlay(spec: &ImageSpec, base_tag: &str) -> Result<String> {
+    // Keyed on the base image's ID, not its tag: the tag is a hash of the base's *inputs*,
+    // so a rebuilt base keeps it. Hashing the tag would leave every existing overlay looking
+    // current while it sits on layers that are gone.
+    let base_id = image_id(base_tag).unwrap_or_else(|| base_tag.to_string());
+
     let mut hasher = Sha1::new();
-    hash_str(&mut hasher, base_tag);
-    hash_str(&mut hasher, &spec.dependencies.join(" "));
-    if let Some(setup) = spec.setup_script {
+    hash_str(&mut hasher, &base_id);
+    hash_str(&mut hasher, &spec.project.dependencies.join(" "));
+    if let Some(setup) = spec.project.setup_script {
         hash_path(&mut hasher, setup)?;
     }
     let hash = format!("{:x}", hasher.finalize());
@@ -102,11 +122,11 @@ fn ensure_overlay(spec: &ImageSpec, base_tag: &str) -> Result<String> {
 
     info!("building overlay image {tag}");
     let ctx = make_context_dir()?;
-    build::assemble_overlay_context(ctx.path(), spec.setup_script)?;
+    build::assemble_setup_scripts(ctx.path(), spec.project.setup_script)?;
 
     let mut args = vec![
         ("BASE", base_tag.to_string()),
-        ("EXTRA_PACKAGES", spec.dependencies.join(" ")),
+        ("EXTRA_PACKAGES", spec.project.dependencies.join(" ")),
     ];
     if spec.rebuild {
         args.push(("CACHEBUST", cachebust()));
@@ -169,6 +189,19 @@ fn image_exists(tag: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// The image's content ID, which changes whenever it is rebuilt.
+fn image_id(tag: &str) -> Option<String> {
+    let output = Command::new("docker")
+        .args(["image", "inspect", "-f", "{{.Id}}", tag])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!id.is_empty()).then_some(id)
 }
 
 fn docker_build(

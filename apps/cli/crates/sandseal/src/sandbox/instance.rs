@@ -42,7 +42,7 @@ fn sanitize_basename(project_dir: &Path) -> String {
 
 /// Load the effective settings (global → profile → project) and announce the profile,
 /// so a profile inherited from state never applies invisibly.
-fn load_settings(project_dir: &Path, choice: &ProfileChoice) -> Result<Settings> {
+fn load_settings(project_dir: &Path, choice: &ProfileChoice) -> Result<load::Resolved> {
     let resolved = load::resolve(project_dir, choice)?;
 
     match &resolved.profile {
@@ -50,15 +50,20 @@ fn load_settings(project_dir: &Path, choice: &ProfileChoice) -> Result<Settings>
         None => debug!("no configuration profile applied"),
     }
 
-    Ok(resolved.settings)
+    Ok(resolved)
 }
 
-/// Resolve the setup hook script to an existing host path, if configured.
-fn resolve_setup_script(settings: &Settings, project_dir: &Path) -> Option<PathBuf> {
+/// The configured setup hook script as a host path — which may not exist.
+fn setup_script_path(settings: &Settings, project_dir: &Path) -> Option<PathBuf> {
     settings.hooks.as_ref()
         .and_then(|h| h.setup.as_ref())
         .and_then(|s| s.script.as_ref())
         .map(|s| crate::path::resolve::resolve_host_path(s, project_dir))
+}
+
+/// Resolve the setup hook script to an existing host path, if configured.
+fn resolve_setup_script(settings: &Settings, project_dir: &Path) -> Option<PathBuf> {
+    setup_script_path(settings, project_dir)
         .filter(|p| {
             if p.exists() {
                 true
@@ -73,6 +78,56 @@ fn resolve_setup_script(settings: &Settings, project_dir: &Path) -> Option<PathB
         })
 }
 
+/// Extra apt packages and a setup hook, destined for one image layer.
+#[derive(Default)]
+struct ImagePayload {
+    dependencies: Vec<String>,
+    setup_script: Option<PathBuf>,
+}
+
+impl ImagePayload {
+    fn as_spec(&self) -> image::Payload<'_> {
+        image::Payload {
+            dependencies: &self.dependencies,
+            setup_script: self.setup_script.as_deref(),
+        }
+    }
+}
+
+/// Split what has to be installed into the machine-wide part and this project's own.
+///
+/// Whatever the project layer did not touch is identical for every project on this machine,
+/// so it belongs in the shared base image — the difference between one apt install and one
+/// per project. A project that drops an inherited dependency (`$replace`) narrows the shared
+/// set instead of contradicting it, which earns it a base image of its own rather than a
+/// wrong one.
+fn split_image_payload(resolved: &load::Resolved, project_dir: &Path) -> (ImagePayload, ImagePayload) {
+    let merged = resolved.settings.dependencies.clone().unwrap_or_default();
+    let shared_dependencies: Vec<String> = resolved.shared.dependencies.iter()
+        .flat_map(|deps| deps.iter())
+        .filter(|dep| merged.contains(dep))
+        .cloned()
+        .collect();
+    let project_dependencies: Vec<String> = merged.into_iter()
+        .filter(|dep| !shared_dependencies.contains(dep))
+        .collect();
+
+    // A project that points `hooks.setup` somewhere else replaces the inherited hook, so the
+    // inherited one must not be baked into the base either — only ever one hook runs.
+    let setup_script = resolve_setup_script(&resolved.settings, project_dir);
+    let inherited = setup_script_path(&resolved.shared, project_dir).filter(|p| p.exists());
+    let (shared_setup, project_setup) = if setup_script == inherited {
+        (setup_script, None)
+    } else {
+        (None, setup_script)
+    };
+
+    (
+        ImagePayload { dependencies: shared_dependencies, setup_script: shared_setup },
+        ImagePayload { dependencies: project_dependencies, setup_script: project_setup },
+    )
+}
+
 fn resolve_base_image(settings: &Settings) -> String {
     settings.container.as_ref()
         .and_then(|c| c.base_image.clone())
@@ -80,11 +135,12 @@ fn resolve_base_image(settings: &Settings) -> String {
 }
 
 /// Build the image spec shared by `start` and `build`.
+#[allow(clippy::too_many_arguments)]
 fn image_spec<'a>(
     project_basename: &'a str,
     base_image: &'a str,
-    dependencies: &'a [String],
-    setup_script: Option<&'a Path>,
+    shared: &'a ImagePayload,
+    project: &'a ImagePayload,
     script_dir: &'a Path,
     uid: u32,
     gid: u32,
@@ -100,8 +156,8 @@ fn image_spec<'a>(
         gid,
         username,
         home,
-        dependencies,
-        setup_script,
+        shared: shared.as_spec(),
+        project: project.as_spec(),
         script_dir,
         rebuild,
     }
@@ -243,7 +299,8 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
 
     // Load and merge settings
     let profile_choice = ProfileChoice::from_flags(args.profile.as_deref(), args.no_profile);
-    let settings = load_settings(&project_dir, &profile_choice)?;
+    let resolved = load_settings(&project_dir, &profile_choice)?;
+    let settings = resolved.settings.clone();
 
     // Before any of the expensive work, and before this sandbox has a container of its own
     // that the sweep would have to reason about.
@@ -255,9 +312,6 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
             hooks::run_setup_host_hooks(setup_host, &project_dir)?;
         }
     }
-
-    // Resolve hooks
-    let setup_script = resolve_setup_script(&settings, &project_dir);
 
     let prestart_scripts: Vec<(usize, PathBuf)> = settings.hooks.as_ref()
         .and_then(|h| h.prestart.as_ref())
@@ -295,13 +349,13 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     let sandbox_home = home.to_string_lossy().to_string();
 
     // Build (or reuse) the sandbox image — shared base + optional per-project overlay
-    let dependencies = settings.dependencies.clone().unwrap_or_default();
+    let (shared_payload, project_payload) = split_image_payload(&resolved, &project_dir);
     let base_image = resolve_base_image(&settings);
     let image = image::ensure_images(&image_spec(
         &project_basename,
         &base_image,
-        &dependencies,
-        setup_script.as_deref(),
+        &shared_payload,
+        &project_payload,
         &script_dir,
         uid,
         gid,
@@ -417,23 +471,22 @@ pub fn build(args: BuildArgs) -> Result<()> {
     let home = dirs::home_dir().context("cannot determine home directory")?;
 
     let profile_choice = ProfileChoice::from_flags(args.profile.as_deref(), args.no_profile);
-    let settings = load_settings(&project_dir, &profile_choice)?;
+    let resolved = load_settings(&project_dir, &profile_choice)?;
 
     let uid = nix::unistd::getuid().as_raw();
     let gid = nix::unistd::getgid().as_raw();
     let username = std::env::var("USER").unwrap_or_else(|_| "agent".to_string());
     let sandbox_home = home.to_string_lossy().to_string();
 
-    let dependencies = settings.dependencies.clone().unwrap_or_default();
-    let base_image = resolve_base_image(&settings);
-    let setup_script = resolve_setup_script(&settings, &project_dir);
+    let (shared_payload, project_payload) = split_image_payload(&resolved, &project_dir);
+    let base_image = resolve_base_image(&resolved.settings);
 
     info!("building sandbox image for {}", project_dir.display());
     let image = image::ensure_images(&image_spec(
         &project_basename,
         &base_image,
-        &dependencies,
-        setup_script.as_deref(),
+        &shared_payload,
+        &project_payload,
         &script_dir,
         uid,
         gid,
@@ -597,6 +650,111 @@ pub fn status() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    /// A resolved configuration from its two merged views: everything, and everything the
+    /// project layer did not contribute.
+    fn resolved(all: Value, shared: Value) -> load::Resolved {
+        load::Resolved {
+            settings: serde_json::from_value(all).unwrap(),
+            shared: serde_json::from_value(shared).unwrap(),
+            value: Value::Null,
+            profile: None,
+        }
+    }
+
+    #[test]
+    fn inherited_dependencies_go_to_the_base_and_the_project_keeps_only_its_own() {
+        let (shared, project) = split_image_payload(
+            &resolved(
+                json!({"dependencies": ["python3", "libnss3", "gcc"]}),
+                json!({"dependencies": ["python3", "libnss3"]}),
+            ),
+            Path::new("/tmp"),
+        );
+
+        assert_eq!(shared.dependencies, ["python3", "libnss3"]);
+        assert_eq!(project.dependencies, ["gcc"]);
+    }
+
+    #[test]
+    fn a_project_that_adds_nothing_needs_no_overlay() {
+        let deps = json!({"dependencies": ["python3", "libnss3"]});
+        let (shared, project) = split_image_payload(&resolved(deps.clone(), deps), Path::new("/tmp"));
+
+        assert_eq!(shared.dependencies, ["python3", "libnss3"]);
+        assert!(project.dependencies.is_empty());
+        assert!(project.setup_script.is_none());
+    }
+
+    /// `$replace` dropping an inherited dependency narrows the shared set rather than
+    /// contradicting it — the project gets a base of its own, not one with the package still in.
+    #[test]
+    fn a_dependency_the_project_dropped_lands_in_neither_payload() {
+        let (shared, project) = split_image_payload(
+            &resolved(
+                json!({"dependencies": ["python3"]}),
+                json!({"dependencies": ["python3", "libnss3"]}),
+            ),
+            Path::new("/tmp"),
+        );
+
+        assert_eq!(shared.dependencies, ["python3"]);
+        assert!(project.dependencies.is_empty());
+    }
+
+    #[test]
+    fn an_inherited_setup_hook_is_baked_into_the_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let hook = dir.path().join("setup.sh");
+        std::fs::write(&hook, "#!/bin/sh\n").unwrap();
+        let cfg = json!({"hooks": {"setup": {"script": hook.to_string_lossy()}}});
+
+        let (shared, project) = split_image_payload(&resolved(cfg.clone(), cfg), dir.path());
+
+        assert_eq!(shared.setup_script.as_deref(), Some(hook.as_path()));
+        assert!(project.setup_script.is_none());
+    }
+
+    /// Only ever one hook runs. A project pointing `hooks.setup` elsewhere replaces the
+    /// inherited one, so that one must not stay baked into the base.
+    #[test]
+    fn a_project_hook_replaces_the_inherited_one_in_both_layers() {
+        let dir = tempfile::tempdir().unwrap();
+        let inherited = dir.path().join("global.sh");
+        let own = dir.path().join("project.sh");
+        std::fs::write(&inherited, "#!/bin/sh\n").unwrap();
+        std::fs::write(&own, "#!/bin/sh\n").unwrap();
+
+        let (shared, project) = split_image_payload(
+            &resolved(
+                json!({"hooks": {"setup": {"script": own.to_string_lossy()}}}),
+                json!({"hooks": {"setup": {"script": inherited.to_string_lossy()}}}),
+            ),
+            dir.path(),
+        );
+
+        assert!(shared.setup_script.is_none());
+        assert_eq!(project.setup_script.as_deref(), Some(own.as_path()));
+    }
+
+    /// A hook that is configured but not on disk is skipped, and skipping it must not be
+    /// mistaken for the project having replaced it.
+    #[test]
+    fn a_missing_inherited_hook_leaves_both_payloads_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = json!({"hooks": {"setup": {"script": dir.path().join("gone.sh").to_string_lossy()}}});
+
+        let (shared, project) = split_image_payload(&resolved(cfg.clone(), cfg), dir.path());
+
+        assert!(shared.setup_script.is_none());
+        assert!(project.setup_script.is_none());
+    }
 }
 
 /// Explicit run of the collector `start` runs quietly.

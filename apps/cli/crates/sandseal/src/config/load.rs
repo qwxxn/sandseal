@@ -49,6 +49,11 @@ impl fmt::Display for ProfileSource {
 
 pub struct Resolved {
     pub settings: Settings,
+    /// The same layers minus the project's own `settings.json` — the slice of the
+    /// configuration that is identical for every project on this machine. What can be
+    /// built once and shared (see `docker::image`) is decided from this, not from
+    /// `settings`, which no longer says where a value came from.
+    pub shared: Settings,
     pub value: Value,
     pub profile: Option<(String, ProfileSource)>,
 }
@@ -86,10 +91,14 @@ pub fn resolve(project_dir: &Path, choice: &ProfileChoice) -> Result<Resolved> {
     let selected = resolve_profile(project_dir, choice)?;
 
     let mut layers = Vec::new();
+    // Everything except the project layer, kept in step with it.
+    let mut shared_layers = Vec::new();
 
     let global = home.join(".sandseal/settings.json");
     if global.exists() {
-        layers.push(validate_settings(&global)?);
+        let layer = validate_settings(&global)?;
+        shared_layers.push(layer.clone());
+        layers.push(layer);
         debug!("settings layer: {}", global.display());
     }
 
@@ -102,16 +111,21 @@ pub fn resolve(project_dir: &Path, choice: &ProfileChoice) -> Result<Resolved> {
     if let Some((name, source)) = &selected {
         // A missing profile is a hard error — silently skipping it would drop
         // whatever restrictions the profile was there to enforce.
-        layers.push(profile::load(name)?);
+        let layer = profile::load(name)?;
+        shared_layers.push(layer.clone());
+        layers.push(layer);
         debug!("settings layer: profile '{name}' (from {source})");
     }
 
     let value = merge_layers(&layers);
     let settings =
         serde_json::from_value(value.clone()).context("failed to deserialize merged settings")?;
+    let shared = serde_json::from_value(merge_layers(&shared_layers))
+        .context("failed to deserialize machine-wide settings")?;
 
     Ok(Resolved {
         settings,
+        shared,
         value,
         profile: selected,
     })
