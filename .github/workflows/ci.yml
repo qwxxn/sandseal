@@ -84,9 +84,14 @@ jobs:
         run: |
           out=$(file apps/cli/target/${{ matrix.target }}/release/sandseal)
           echo "$out"
+          # Two spellings, because a static PIE is reported as "static-pie linked" rather
+          # than "statically linked". Anything else is refused rather than assumed static.
           case "$out" in
-            *"statically linked"*) ;;
-            *) echo "::error::not a static binary — it would inherit a glibc floor from the runner"; exit 1 ;;
+            *"dynamically linked"*)
+              echo "::error::not a static binary — it would inherit a glibc floor from the runner"; exit 1 ;;
+            *"statically linked"*|*"static-pie linked"*) ;;
+            *)
+              echo "::error::cannot tell whether the binary is static from: $out"; exit 1 ;;
           esac
       - name: Package
         run: |
