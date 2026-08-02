@@ -32,8 +32,30 @@ pub fn compose_cmd(
     ]
 }
 
+/// Create the volumes every sandbox shares. Idempotent: docker returns the existing volume
+/// rather than failing, so this is just the step that makes the first start work — compose
+/// declares them external and will not create them itself.
+fn ensure_shared_volumes() -> Result<()> {
+    for (_, name) in crate::docker::compose::SHARED_VOLUMES {
+        let output = Command::new("docker")
+            .args(["volume", "create", name])
+            .output()
+            .context("failed to run docker volume create")?;
+
+        if !output.status.success() {
+            bail!(
+                "could not create shared volume {name}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Run `docker compose up -d agent` (images are prebuilt by the image module).
 pub fn compose_up(cmd: &[String], env: &ComposeEnv) -> Result<()> {
+    ensure_shared_volumes()?;
+
     let mut args: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
     args.push("up");
     args.push("-d");

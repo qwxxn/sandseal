@@ -7,6 +7,23 @@ use crate::path::exclusion::resolve_exclusions;
 use crate::path::inclusion::resolve_inclusions;
 use crate::path::resolve::resolve_host_path;
 
+/// Survives container restarts — CLI logins, installed tools, downloaded browsers.
+const AGENT_HOME_VOLUME: (&str, &str) = ("sandseal-agent-home", "sandseal-sandbox-agent-home");
+/// Speeds up repeated installs across sandboxes.
+const APT_CACHE_VOLUME: (&str, &str) = ("sandseal-apt-cache", "sandseal-sandbox-apt-cache");
+
+/// Volumes every sandbox on the machine shares, as `(compose alias, docker name)`.
+///
+/// The docker name is pinned so compose does not prefix it with the (per-instance,
+/// randomized) project name — otherwise every start gets a fresh empty volume and nothing
+/// in the agent home survives a restart.
+///
+/// They are declared external for the same reason they are shared: compose stamps the
+/// creating project onto a volume it makes itself, and every later project then warns that
+/// it found someone else's. Being shared is the point, so the CLI creates them up front
+/// (`runtime::ensure_shared_volumes`) and compose is only ever told to use them.
+pub const SHARED_VOLUMES: [(&str, &str); 2] = [AGENT_HOME_VOLUME, APT_CACHE_VOLUME];
+
 pub struct ComposeContext<'a> {
     pub project_dir: &'a Path,
     pub project_name: &'a str,
@@ -58,11 +75,8 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         }
     }
 
-    // Persistent agent home volume (survives container restarts — keeps CLI logins, installed tools, etc.)
-    volumes.push(format!("sandseal-agent-home:{}", ctx.sandbox_home));
-
-    // Shared apt cache volume (speeds up repeated installs across sandboxes)
-    volumes.push("sandseal-apt-cache:/var/cache/apt".to_string());
+    volumes.push(format!("{}:{}", AGENT_HOME_VOLUME.0, ctx.sandbox_home));
+    volumes.push(format!("{}:/var/cache/apt", APT_CACHE_VOLUME.0));
 
     // Docker socket (opt-in via settings)
     let docker_passthrough = ctx.settings.docker.as_ref()
@@ -287,17 +301,11 @@ fn format_compose_yaml(
         yaml.push_str(&format!("    command: {cmd_json}\n"));
     }
 
-    // Top-level volumes declaration. Pin explicit names so compose does NOT prefix
-    // them with the (per-instance, randomized) project name — otherwise every start
-    // gets a fresh empty volume and the agent home (CLI logins, installed tools,
-    // downloaded browsers) never persists across restarts.
+    // Top-level declaration of the machine-wide volumes (see SHARED_VOLUMES).
     yaml.push_str("\nvolumes:\n");
-    yaml.push_str("  sandseal-agent-home:\n");
-    yaml.push_str("    name: sandseal-sandbox-agent-home\n");
-    yaml.push_str("    external: false\n");
-    yaml.push_str("  sandseal-apt-cache:\n");
-    yaml.push_str("    name: sandseal-sandbox-apt-cache\n");
-    yaml.push_str("    external: false\n");
+    for (alias, name) in SHARED_VOLUMES {
+        yaml.push_str(&format!("  {alias}:\n    name: {name}\n    external: true\n"));
+    }
 
     yaml
 }
@@ -349,6 +357,26 @@ mod tests {
             yaml.contains("/opt/sandseal/skills:ro"),
             "skills must reach the container so the agent can learn to configure it:\n{yaml}"
         );
+    }
+
+    /// Shared between every project, so compose must not claim ownership: a volume it creates
+    /// carries the creating project's name, and each project after that warns about finding
+    /// someone else's.
+    #[test]
+    fn the_machine_wide_volumes_are_declared_external_under_fixed_names() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
+
+        for (alias, name) in SHARED_VOLUMES {
+            assert!(
+                yaml.contains(&format!("  {alias}:\n    name: {name}\n    external: true\n")),
+                "{name} must be external and named, not owned by whichever project started first:\n{yaml}"
+            );
+        }
+        assert!(yaml.contains(&format!("{}:/home/agent", AGENT_HOME_VOLUME.0)));
+        assert!(yaml.contains(&format!("{}:/var/cache/apt", APT_CACHE_VOLUME.0)));
     }
 
     #[test]
