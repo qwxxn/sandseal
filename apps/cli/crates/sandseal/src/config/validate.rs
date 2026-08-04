@@ -100,6 +100,9 @@ mod tests {
         assert!(schema_knows_path(&s, "files.include"));
         assert!(schema_knows_path(&s, "files.exclude"));
         assert!(schema_knows_path(&s, "docker.passthrough"));
+        // A key the Settings struct knows but the schema does not is rejected before it ever
+        // reaches deserialization, so the two have to be added together.
+        assert!(schema_knows_path(&s, "container.aptMirror"));
     }
 
     #[test]

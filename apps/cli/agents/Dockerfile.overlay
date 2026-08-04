@@ -17,9 +17,10 @@ ARG CACHEBUST=1
 # Call the real apt-get directly (not the /usr/local/bin wrapper) so these
 # build-time installs are not logged as runtime packages.
 ARG EXTRA_PACKAGES=""
-RUN if [ -n "$EXTRA_PACKAGES" ]; then \
-      /usr/bin/apt-get update && /usr/bin/apt-get install -y --no-install-recommends $EXTRA_PACKAGES \
-      && rm -rf /var/lib/apt/lists/*; \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    if [ -n "$EXTRA_PACKAGES" ]; then \
+      /usr/bin/apt-get update && /usr/bin/apt-get install -y --no-install-recommends $EXTRA_PACKAGES; \
     fi
 
 ## Setup hook script (runs as root — can install system packages, configure locales, etc.)

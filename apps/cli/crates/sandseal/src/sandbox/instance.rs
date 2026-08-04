@@ -134,11 +134,18 @@ fn resolve_base_image(settings: &Settings) -> String {
         .unwrap_or_else(|| "ubuntu:24.04".to_string())
 }
 
+fn resolve_apt_mirror(settings: &Settings) -> Option<String> {
+    settings.container.as_ref()
+        .and_then(|c| c.apt_mirror.clone())
+        .filter(|m| !m.trim().is_empty())
+}
+
 /// Build the image spec shared by `start` and `build`.
 #[allow(clippy::too_many_arguments)]
 fn image_spec<'a>(
     project_basename: &'a str,
     base_image: &'a str,
+    apt_mirror: Option<&'a str>,
     shared: &'a ImagePayload,
     project: &'a ImagePayload,
     script_dir: &'a Path,
@@ -152,6 +159,7 @@ fn image_spec<'a>(
         agent: AGENT,
         project_basename,
         base_image,
+        apt_mirror,
         uid,
         gid,
         username,
@@ -351,9 +359,11 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     // Build (or reuse) the sandbox image — shared base + optional per-project overlay
     let (shared_payload, project_payload) = split_image_payload(&resolved, &project_dir);
     let base_image = resolve_base_image(&settings);
+    let apt_mirror = resolve_apt_mirror(&settings);
     let image = image::ensure_images(&image_spec(
         &project_basename,
         &base_image,
+        apt_mirror.as_deref(),
         &shared_payload,
         &project_payload,
         &script_dir,
@@ -480,11 +490,13 @@ pub fn build(args: BuildArgs) -> Result<()> {
 
     let (shared_payload, project_payload) = split_image_payload(&resolved, &project_dir);
     let base_image = resolve_base_image(&resolved.settings);
+    let apt_mirror = resolve_apt_mirror(&resolved.settings);
 
     info!("building sandbox image for {}", project_dir.display());
     let image = image::ensure_images(&image_spec(
         &project_basename,
         &base_image,
+        apt_mirror.as_deref(),
         &shared_payload,
         &project_payload,
         &script_dir,
@@ -666,6 +678,22 @@ mod tests {
             value: Value::Null,
             profile: None,
         }
+    }
+
+    #[test]
+    fn apt_mirror_reads_from_settings_and_ignores_a_blank_one() {
+        let set = |v: Value| -> Settings { serde_json::from_value(v).unwrap() };
+
+        assert_eq!(
+            resolve_apt_mirror(&set(
+                json!({"container": {"aptMirror": "http://cz.archive.ubuntu.com/ubuntu"}})
+            )),
+            Some("http://cz.archive.ubuntu.com/ubuntu".to_string())
+        );
+        // Blank is the same as unset — an empty APT_MIRROR must not rewrite the sources.
+        assert_eq!(resolve_apt_mirror(&set(json!({"container": {"aptMirror": "  "}}))), None);
+        assert_eq!(resolve_apt_mirror(&set(json!({"container": {"memoryLimit": "8g"}}))), None);
+        assert_eq!(resolve_apt_mirror(&set(json!({}))), None);
     }
 
     #[test]
