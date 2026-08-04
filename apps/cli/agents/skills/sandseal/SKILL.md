@@ -154,6 +154,18 @@ file, or have the user pass it another way.
 Reach for `memoryLimit` when a build dies with an out-of-memory or a bare "killed".
 `baseImage` needs a rebuild.
 
+`aptMirror` replaces the archive packages are installed from:
+
+```json
+{ "container": { "aptMirror": "http://cz.archive.ubuntu.com/ubuntu" } }
+```
+
+Reach for it when a build crawls at the `apt-get install` step. `ubuntu:24.04` points at
+`archive.ubuntu.com`, a global pool some networks reach at a fraction of a country mirror's
+speed — a build that should take minutes then takes hours and looks like it hung. Check with
+`curl -o /dev/null -w '%{speed_download} B/s\n' http://archive.ubuntu.com/ubuntu/dists/noble/main/binary-amd64/Packages.gz`
+against the same path on a country mirror; a large gap is the answer. Needs a rebuild.
+
 ### `hooks` — scripts around the lifecycle
 
 **Every `script` is a PATH to a script file, never a shell command.** An inline command is
@@ -241,7 +253,7 @@ Turn it off only if you deliberately keep sandboxes running with no CLI attached
 
 | Changed | Needed |
 |---|---|
-| `dependencies`, `hooks.setup`, `container.baseImage` | `sandseal start --rebuild` (or `sandseal build` then `sandseal start`) |
+| `dependencies`, `hooks.setup`, `container.baseImage`, `container.aptMirror` | `sandseal start --rebuild` (or `sandseal build` then `sandseal start`) |
 | everything else | next `sandseal start` |
 
 Useful commands to hand the user, all run **on the host**:

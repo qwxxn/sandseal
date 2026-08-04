@@ -13,6 +13,25 @@ ARG AGENT_HOME=/home/agent
 # removes default ubuntu user whose id we need for the agent user
 RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
 
+# Every apt step below mounts /var/cache/apt and /var/lib/apt/lists as build caches, so a
+# rebuild re-downloads only what changed upstream. The stock image ships docker-clean, which
+# deletes the .debs right after each install and would leave those caches empty.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+# Optional replacement for the archive the base image points at. The stock hosts resolve to a
+# global pool that some networks reach at a fraction of the speed of a country mirror.
+# security.ubuntu.com is rewritten too: it is a separate host, often the slower of the two, and
+# a country mirror carries the same -security pocket at the cost of a short sync delay.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+      shopt -s nullglob; \
+      files=(/etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list); \
+      if [ ${#files[@]} -eq 0 ]; then echo "aptMirror: no apt sources to rewrite" >&2; exit 1; fi; \
+      sed -i -E "s#https?://(archive|[a-z]{2}\.archive|security|ports)\.ubuntu\.com/ubuntu/?#${APT_MIRROR%/}/#g" "${files[@]}"; \
+      echo "apt archive: ${APT_MIRROR%/}"; \
+    fi
+
 # Project-agnostic base image. Shared across all projects with identical inputs
 # (base image, user, agent installs, machine-wide dependencies and setup hook). Only what
 # a project adds on top of those lives in Dockerfile.overlay, built FROM this image.
@@ -21,7 +40,9 @@ RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu
 ARG CACHEBUST=1
 
 ## Base dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     jq \
@@ -30,15 +51,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     ca-certificates \
     gnupg \
-    sudo \
-    && rm -rf /var/lib/apt/lists/*
+    sudo
 
 ## Docker CLI
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
       && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list \
       && apt-get update \
-      && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
-      && rm -rf /var/lib/apt/lists/*
+      && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin
 
 # Agent CLI installations (root phase — global packages)
 COPY agent-installs/ /tmp/agent-installs/
@@ -110,9 +131,10 @@ ENV PATH="${AGENT_HOME}/.local/bin:$PATH"
 # Call the real apt-get directly (not the /usr/local/bin wrapper) so these build-time
 # installs are not logged as runtime packages.
 ARG SHARED_PACKAGES=""
-RUN if [ -n "$SHARED_PACKAGES" ]; then \
-      /usr/bin/apt-get update && /usr/bin/apt-get install -y --no-install-recommends $SHARED_PACKAGES \
-      && rm -rf /var/lib/apt/lists/*; \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    if [ -n "$SHARED_PACKAGES" ]; then \
+      /usr/bin/apt-get update && /usr/bin/apt-get install -y --no-install-recommends $SHARED_PACKAGES; \
     fi
 
 ## Machine-wide setup hook (runs as root — can install system packages, configure locales, etc.)

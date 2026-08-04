@@ -66,6 +66,12 @@
         "baseImage": {
           "type": "string",
           "minLength": 1
+        },
+        "aptMirror": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Ubuntu archive to install packages from, e.g. http://cz.archive.ubuntu.com/ubuntu. Defaults to whatever the base image ships.",
+          "pattern": "^https?://"
         }
       }
     },

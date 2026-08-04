@@ -129,6 +129,13 @@ pub struct ContainerSettings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_image: Option<String>,
+
+    /// Debian/Ubuntu archive to install packages from, e.g. `http://cz.archive.ubuntu.com/ubuntu`.
+    /// Defaults to whatever the base image ships, which for `ubuntu:24.04` is
+    /// `archive.ubuntu.com` — a host routed badly enough from some networks to turn a build
+    /// into an hour of downloading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apt_mirror: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
