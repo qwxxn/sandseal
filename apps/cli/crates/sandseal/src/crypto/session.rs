@@ -53,6 +53,7 @@ pub struct SessionKeys {
     created_at: Instant,
     shared_secret: Vec<u8>,
     generation: u32,
+    is_initiator: bool,
 }
 
 impl Drop for SessionKeys {
@@ -93,6 +94,7 @@ impl SessionKeys {
             created_at: Instant::now(),
             shared_secret: shared_bytes,
             generation: 0,
+            is_initiator,
         }
     }
 
@@ -164,8 +166,10 @@ impl SessionKeys {
         let info = format!("sandseal-session-v1-gen{}", self.generation).into_bytes();
         let (key_a, key_b) = hkdf_derive_pair(&self.shared_secret, None, &info);
 
-        let is_initiator = self.send_seq > 0 || self.generation > 1;
-        let (new_send, new_recv) = if is_initiator {
+        // The role comes from the handshake, never from traffic — inferring it
+        // here put the same key in both peers' send slot on any bidirectional,
+        // silent or twice-rotated session.
+        let (new_send, new_recv) = if self.is_initiator {
             (key_a, key_b)
         } else {
             (key_b, key_a)
@@ -309,6 +313,61 @@ mod tests {
         let f2 = alice.seal(MessageType::Data, b"after rotation").unwrap();
         let (_, p2) = bob.open(&f2).unwrap();
         assert_eq!(p2, b"after rotation");
+    }
+
+    /// Regression for the night audit 2026-07-25 finding N2: `rotate()` used to
+    /// re-derive the initiator role from traffic (`send_seq > 0 || generation >
+    /// 1`) instead of remembering it from the handshake. `key_rotation` above
+    /// only exercises the single shape that guess got right — one-directional
+    /// traffic in generation 1. These cover the three that it did not.
+    #[test]
+    fn rotation_survives_bidirectional_traffic() {
+        let (mut alice, mut bob) = make_session_pair();
+
+        // An interactive terminal always has traffic in both directions by the
+        // time a rotation fires.
+        let f1 = alice.seal(MessageType::Data, b"ls\n").unwrap();
+        bob.open(&f1).unwrap();
+        let f2 = bob.seal(MessageType::Data, b"total 0\n").unwrap();
+        alice.open(&f2).unwrap();
+
+        alice.rotate();
+        bob.rotate();
+
+        let f3 = alice.seal(MessageType::Data, b"after rotation").unwrap();
+        let (_, p3) = bob.open(&f3).unwrap();
+        assert_eq!(p3, b"after rotation");
+    }
+
+    #[test]
+    fn rotation_survives_a_silent_session() {
+        let (mut alice, mut bob) = make_session_pair();
+
+        alice.rotate();
+        bob.rotate();
+
+        let frame = alice.seal(MessageType::Data, b"silent").unwrap();
+        let (_, plaintext) = bob.open(&frame).unwrap();
+        assert_eq!(plaintext, b"silent");
+    }
+
+    #[test]
+    fn second_rotation_keeps_peers_in_sync() {
+        let (mut alice, mut bob) = make_session_pair();
+
+        let f1 = alice.seal(MessageType::Data, b"before").unwrap();
+        bob.open(&f1).unwrap();
+
+        alice.rotate();
+        bob.rotate();
+        alice.rotate();
+        bob.rotate();
+
+        assert_eq!(alice.generation(), 2);
+
+        let f2 = alice.seal(MessageType::Data, b"gen2").unwrap();
+        let (_, p2) = bob.open(&f2).unwrap();
+        assert_eq!(p2, b"gen2");
     }
 
     #[test]
