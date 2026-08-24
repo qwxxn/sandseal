@@ -249,6 +249,27 @@ at risk.
 Turn it off only if you deliberately keep sandboxes running with no CLI attached. `sandseal gc`
 (and `sandseal gc --dry-run`) work either way.
 
+### `terminal.title` — naming the terminal window
+
+```json
+{ "terminal": { "title": false } }
+```
+
+By default `sandseal start` names the window it was started from `<project>·<instance>`, plus
+`[profile]` when one is active, and puts that in front of whatever title the agent sets — so a
+Claude Code topic shows up as `myrepo·a7f79d ▸ ✳ fixing the parser`. With several sandboxes
+open that prefix is what tells the windows apart; the instance id is there because more than
+one session over the same repo is the case that makes people rename windows by hand.
+
+Under tmux or screen the same title also goes out as DCS passthrough, since the agent cannot
+detect a multiplexer (`TMUX` exists only outside the container) and a bare OSC would be
+swallowed. A multiplexer that does not allow passthrough discards it silently.
+
+Set `title` to `false` to leave the window title entirely to the agent. If the title never
+changes at all, the terminal is dropping it rather than sandseal: tmux needs
+`set-option -g allow-rename on`, and Windows Terminal ignores titles when the profile sets
+`"suppressApplicationTitle": true` or when the tab was renamed by hand.
+
 ## Which command applies the change
 
 | Changed | Needed |

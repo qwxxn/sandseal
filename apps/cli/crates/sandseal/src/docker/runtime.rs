@@ -1,11 +1,12 @@
 use anyhow::{bail, Context, Result};
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, error, info};
 
-use crate::docker::tty;
+use crate::docker::{title, tty};
 
 /// Environment variables needed by the base docker-compose.yml template.
 pub struct ComposeEnv {
@@ -102,7 +103,10 @@ pub fn compose_down(cmd: &[String]) -> Result<()> {
 }
 
 /// Wait for the container to be in "running" state, then attach.
-pub async fn wait_and_attach(container_name: &str) -> Result<()> {
+///
+/// `title_prefix` names the host terminal window for the duration of the session; pass an
+/// empty string to leave the window title entirely to the agent.
+pub async fn wait_and_attach(container_name: &str, title_prefix: &str) -> Result<()> {
     let max_retries = 20;
     let delay = Duration::from_millis(500);
 
@@ -118,7 +122,7 @@ pub async fn wait_and_attach(container_name: &str) -> Result<()> {
         match state.as_str() {
             "running" => {
                 info!("container is running, attaching...");
-                return attach(container_name).await;
+                return attach(container_name, title_prefix).await;
             }
             "exited" | "dead" => {
                 let logs = Command::new("docker")
@@ -143,7 +147,7 @@ pub async fn wait_and_attach(container_name: &str) -> Result<()> {
 ///
 /// `docker attach` only sets the TTY size on connect, so we push the initial
 /// size and every subsequent SIGWINCH to the container via the Docker API.
-async fn attach(container_name: &str) -> Result<()> {
+async fn attach(container_name: &str, title_prefix: &str) -> Result<()> {
     let docker = tty::connect();
 
     // Set the correct size before the agent draws its first frame.
@@ -170,13 +174,28 @@ async fn attach(container_name: &str) -> Result<()> {
         })
     });
 
-    let mut child = tokio::process::Command::new("docker")
+    // Naming the window is only worth doing when there is a window: piping the output
+    // somewhere would otherwise get an escape sequence injected into it.
+    let naming = !title_prefix.is_empty() && std::io::stdout().is_terminal();
+
+    let mut command = tokio::process::Command::new("docker");
+    command
         .args(["attach", "--sig-proxy=false", container_name])
         .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .spawn()
-        .context("failed to attach to container")?;
+        .stdout(if naming { Stdio::piped() } else { Stdio::inherit() });
+
+    let mut child = command.spawn().context("failed to attach to container")?;
+
+    if naming {
+        let writer = title::TitleWriter::new(title_prefix.to_string());
+        // Name the window before the agent draws, so it is identifiable from the start
+        // rather than once the agent has a topic to report.
+        title::seed(&writer);
+
+        let stdout = child.stdout.take().expect("stdout was piped above");
+        relay_output(stdout, title::TitleFilter::new(writer)).await;
+    }
 
     let status = child.wait().await.context("docker attach failed")?;
 
@@ -186,6 +205,45 @@ async fn attach(container_name: &str) -> Result<()> {
 
     debug!("container exited with code: {}", status.code().unwrap_or(-1));
     Ok(())
+}
+
+/// Copy the attached output to our own stdout, letting the filter rename window titles on
+/// the way past. Every read is written and flushed as it arrives — the agent is drawing a
+/// live TUI, so nothing may sit in a buffer waiting for a newline.
+async fn relay_output<R>(mut source: R, mut filter: title::TitleFilter)
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut out = tokio::io::stdout();
+    let mut buf = [0u8; 8192];
+
+    loop {
+        let read = match source.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                debug!("attached output ended: {e}");
+                break;
+            }
+        };
+
+        let bytes = filter.feed(&buf[..read]);
+        if bytes.is_empty() {
+            continue;
+        }
+        if out.write_all(&bytes).await.is_err() || out.flush().await.is_err() {
+            break;
+        }
+    }
+
+    // Anything the filter was still examining belongs to the terminal, not to us.
+    let tail = filter.flush();
+    if !tail.is_empty() {
+        let _ = out.write_all(&tail).await;
+    }
+    let _ = out.flush().await;
 }
 
 /// Get the container name for a compose project.

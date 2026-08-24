@@ -245,6 +245,18 @@
         }
       },
       "description": "When the collector for abandoned sandboxes runs on its own."
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether `sandseal start` names the host terminal window after the sandbox, as `<project>\u00b7<instance> [profile]`. The name is put in front of whatever title the agent sets, so the agent's own topic stays visible; with several sandboxes open it is what tells the windows apart. Under tmux or screen the same title is also sent as DCS passthrough, which the multiplexer discards silently if it does not allow it. Turn this off to leave the window title entirely to the agent."
+        }
+      },
+      "description": "How the sandbox presents itself in the terminal it was started from."
     }
   }
 }
