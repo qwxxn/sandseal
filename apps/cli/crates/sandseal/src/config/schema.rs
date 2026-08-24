@@ -39,6 +39,9 @@ pub struct Settings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gc: Option<GcSettings>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<TerminalSettings>,
 }
 
 impl Settings {
@@ -52,6 +55,27 @@ impl Settings {
             .and_then(|gc| gc.on_start)
             .unwrap_or(true)
     }
+
+    /// Whether the CLI names the host terminal window after the sandbox.
+    ///
+    /// Opt-out: unnamed windows are indistinguishable once more than one sandbox is open,
+    /// which is the normal case rather than the exotic one.
+    pub fn terminal_title(&self) -> bool {
+        self.terminal
+            .as_ref()
+            .and_then(|terminal| terminal.title)
+            .unwrap_or(true)
+    }
+}
+
+/// How the sandbox presents itself in the terminal it was started from.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSettings {
+    /// Name the window after the sandbox, in front of whatever title the agent sets.
+    /// Defaults to true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<bool>,
 }
 
 /// When the collector runs on its own.

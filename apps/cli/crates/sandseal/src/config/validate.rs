@@ -149,6 +149,12 @@ mod tests {
     }
 
     #[test]
+    fn accepts_turning_the_window_title_off() {
+        assert!(validate_value(serde_json::json!({"terminal": {"title": false}})).is_ok());
+        assert!(schema_knows_path(&schema(), "terminal.title"));
+    }
+
+    #[test]
     fn rejects_a_project_name_the_server_would_refuse() {
         // Same pattern the memory service enforces. Catching it here means a bad name fails
         // at `config edit`, not silently at the next session when the scope drops to null.

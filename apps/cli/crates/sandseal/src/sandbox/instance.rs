@@ -178,6 +178,18 @@ fn generate_instance_id() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// What to call the host terminal window running this sandbox.
+///
+/// The project alone is not enough — several sessions over one repo is the case that sends
+/// people renaming windows by hand — so the instance id rides along as the discriminator.
+/// An active profile is worth seeing too: it decides what the sandbox may reach.
+fn window_name(project_basename: &str, instance_id: &str, profile: Option<&str>) -> String {
+    match profile {
+        Some(profile) => format!("{project_basename}·{instance_id} [{profile}]"),
+        None => format!("{project_basename}·{instance_id}"),
+    }
+}
+
 /// Find the sandseal script/assets directory.
 fn find_script_dir() -> Result<PathBuf> {
     if let Ok(dir) = std::env::var("SANDSEAL_DIR") {
@@ -218,6 +230,8 @@ pub struct StartedSandbox {
     pub guard: Arc<Mutex<CleanupGuard>>,
     /// Session id to close on exit, which is what revokes the memory credential.
     pub memory_session_id: Option<String>,
+    /// What to call the host terminal window; empty leaves the title to the agent.
+    pub title_prefix: String,
 }
 
 pub async fn start(args: StartArgs) -> Result<()> {
@@ -231,7 +245,7 @@ pub async fn start(args: StartArgs) -> Result<()> {
         .map(|id| heartbeat::spawn(args.api_url.clone(), id));
 
     // Local mode: attach interactively
-    runtime::wait_and_attach(&started.container_name).await?;
+    runtime::wait_and_attach(&started.container_name, &started.title_prefix).await?;
 
     if let Some(task) = heartbeat {
         task.abort();
@@ -309,6 +323,13 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     let profile_choice = ProfileChoice::from_flags(args.profile.as_deref(), args.no_profile);
     let resolved = load_settings(&project_dir, &profile_choice)?;
     let settings = resolved.settings.clone();
+
+    let title_prefix = if settings.terminal_title() {
+        let profile = resolved.profile.as_ref().map(|(name, _)| name.as_str());
+        window_name(&project_basename, &instance_id, profile)
+    } else {
+        String::new()
+    };
 
     // Before any of the expensive work, and before this sandbox has a container of its own
     // that the sweep would have to reason about.
@@ -463,6 +484,7 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         project_dir,
         guard,
         memory_session_id,
+        title_prefix,
     })
 }
 
