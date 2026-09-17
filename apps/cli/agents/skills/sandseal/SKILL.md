@@ -270,6 +270,25 @@ changes at all, the terminal is dropping it rather than sandseal: tmux needs
 `set-option -g allow-rename on`, and Windows Terminal ignores titles when the profile sets
 `"suppressApplicationTitle": true` or when the tab was renamed by hand.
 
+### `clipboard.enabled` — pasting images from the host
+
+```json
+{ "clipboard": { "enabled": false } }
+```
+
+By default the sandbox can read the host clipboard, which is what makes pasting an image
+into the agent (Ctrl+V) work. There is no display inside the container for Claude Code's
+`xclip` to talk to, so the CLI serves the clipboard over a socket in the instance tmp dir and
+`/usr/local/bin/xclip` in the container is a stand-in that forwards the requests to it. Only
+the bytes asked for cross into the sandbox — not the display, not the Windows drive on WSL.
+Read-only: `xclip -i` (copying out of the sandbox) is not bridged.
+
+Set `enabled` to `false` where the clipboard may hold secrets the sandbox must not see. The
+bridge answers whenever the sandbox asks, not only when the user pastes, so an agent could
+read a password sitting on the clipboard. If image paste does nothing with the bridge on,
+check `xclip -selection clipboard -t TARGETS -o` inside the sandbox: it lists what the host
+clipboard currently offers, and exits 1 with a message when the bridge is not reachable.
+
 ## Which command applies the change
 
 | Changed | Needed |

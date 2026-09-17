@@ -232,6 +232,8 @@ pub struct StartedSandbox {
     pub memory_session_id: Option<String>,
     /// What to call the host terminal window; empty leaves the title to the agent.
     pub title_prefix: String,
+    /// Serves the host clipboard to the sandbox for as long as it runs.
+    pub clipboard: Option<crate::clipboard::server::Bridge>,
 }
 
 pub async fn start(args: StartArgs) -> Result<()> {
@@ -249,6 +251,9 @@ pub async fn start(args: StartArgs) -> Result<()> {
 
     if let Some(task) = heartbeat {
         task.abort();
+    }
+    if let Some(clipboard) = &started.clipboard {
+        clipboard.stop();
     }
 
     suggest_runtime_packages(&started.project_dir, &crate::config::Settings::default());
@@ -410,6 +415,15 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         info!("memory enabled for this session");
     }
 
+    // Clipboard bridge. Bound before the override is written, since compose bind-mounts the
+    // socket file and a path that does not exist yet would become an empty directory.
+    let clipboard = if settings.clipboard_enabled() {
+        crate::clipboard::server::start(&tmp_path)
+    } else {
+        debug!("clipboard.enabled is off, the sandbox gets no host clipboard");
+        None
+    };
+
     // Generate compose override
     let compose_ctx = compose::ComposeContext {
         project_dir: &project_dir,
@@ -423,6 +437,7 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         tmp_dir: &tmp_path,
         script_dir: &script_dir,
         memory: memory.as_ref(),
+        clipboard_socket: clipboard.as_ref().map(|bridge| bridge.socket.as_path()),
     };
 
     let override_yaml = compose::generate_compose_override(&compose_ctx)?;
@@ -485,6 +500,7 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         guard,
         memory_session_id,
         title_prefix,
+        clipboard,
     })
 }
 

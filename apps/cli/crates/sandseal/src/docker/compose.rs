@@ -37,6 +37,9 @@ pub struct ComposeContext<'a> {
     pub script_dir: &'a Path,
     /// Memory credential for this session, when the account has memory. None = no memory.
     pub memory: Option<&'a crate::memory::session::MemorySession>,
+    /// Host path of the clipboard bridge socket, when the bridge is serving. None = no
+    /// clipboard in the sandbox.
+    pub clipboard_socket: Option<&'a Path>,
 }
 
 /// Generate docker-compose override YAML for a sandbox instance.
@@ -126,12 +129,24 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         ));
     }
 
-    // The memory bridge is this same binary, so mount it in. Read-only: the agent has no
-    // business rewriting the tool that carries its credential.
-    if ctx.memory.is_some() {
+    // Clipboard bridge: the socket (writable — connecting needs write access to the socket
+    // inode) and the `xclip` stand-in that forwards the agent's requests to it.
+    if let Some(socket) = ctx.clipboard_socket {
+        volumes.push(format!("{}:{}", socket.display(), crate::clipboard::CONTAINER_SOCKET));
+        let shim = ctx.script_dir.join(crate::clipboard::SHIM_ASSET);
+        if shim.is_file() {
+            volumes.push(format!("{}:{}:ro", shim.display(), crate::clipboard::SHIM_MOUNT));
+        } else {
+            tracing::warn!("clipboard shim missing at {}, image paste will not work", shim.display());
+        }
+    }
+
+    // The memory and clipboard bridges are this same binary, so mount it in. Read-only: the
+    // agent has no business rewriting the tool that carries its credential.
+    if ctx.memory.is_some() || ctx.clipboard_socket.is_some() {
         match std::env::current_exe() {
             Ok(exe) => volumes.push(format!("{}:/usr/local/bin/sandseal:ro", exe.display())),
-            Err(err) => tracing::warn!("cannot locate own binary, memory bridge unavailable: {err}"),
+            Err(err) => tracing::warn!("cannot locate own binary, in-sandbox bridges unavailable: {err}"),
         }
     }
     // Prestart scripts
@@ -160,6 +175,13 @@ pub fn generate_compose_override(ctx: &ComposeContext) -> Result<String> {
         environment.insert(
             "SANDSEAL_MEMORY_CROSS_PROJECT".to_string(),
             if cross_project { "1" } else { "0" }.to_string(),
+        );
+    }
+
+    if ctx.clipboard_socket.is_some() {
+        environment.insert(
+            crate::clipboard::SOCKET_ENV.to_string(),
+            crate::clipboard::CONTAINER_SOCKET.to_string(),
         );
     }
 
@@ -340,7 +362,38 @@ mod tests {
             tmp_dir: project_dir,
             script_dir,
             memory: None,
+            clipboard_socket: None,
         }
+    }
+
+    #[test]
+    fn the_clipboard_bridge_reaches_the_container_as_xclip() {
+        let script_dir = script_dir_with_agent();
+        std::fs::create_dir_all(script_dir.path().join("agents/clipboard")).unwrap();
+        std::fs::write(script_dir.path().join("agents/clipboard/xclip"), "#!/bin/sh\n").unwrap();
+
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let socket = project.path().join("clipboard.sock");
+        let mut ctx = context(script_dir.path(), project.path(), &settings);
+        ctx.clipboard_socket = Some(&socket);
+        let yaml = generate_compose_override(&ctx).unwrap();
+
+        assert!(yaml.contains(&format!("{}:/run/sandseal/clipboard.sock\"", socket.display())), "{yaml}");
+        assert!(yaml.contains("agents/clipboard/xclip:/usr/local/bin/xclip:ro"), "{yaml}");
+        assert!(yaml.contains("SANDSEAL_CLIPBOARD_SOCKET: \"/run/sandseal/clipboard.sock\""), "{yaml}");
+        assert!(yaml.contains("/usr/local/bin/sandseal:ro"), "the client is the sandseal binary:\n{yaml}");
+    }
+
+    #[test]
+    fn no_bridge_means_no_clipboard_in_the_sandbox() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
+
+        assert!(!yaml.contains("clipboard"), "{yaml}");
+        assert!(!yaml.contains("/usr/local/bin/xclip"), "{yaml}");
     }
 
     #[test]

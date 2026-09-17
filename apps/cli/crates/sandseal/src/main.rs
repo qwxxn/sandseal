@@ -1,5 +1,6 @@
 mod auth;
 mod cli;
+mod clipboard;
 mod config;
 mod crypto;
 mod docker;
@@ -45,6 +46,10 @@ async fn main() -> Result<()> {
         }
         Command::Whoami => whoami()?,
         Command::Memory(args) => memory::run(args).await?,
+        Command::Clipboard(args) => {
+            let code = clipboard::client::run(&args.args).await?;
+            std::process::exit(code);
+        }
         Command::Update(args) => update::run(args).await?,
         Command::Connect(args) => {
             let project_dir = std::fs::canonicalize(&args.path)
@@ -159,6 +164,9 @@ async fn start_remote(args: cli::StartArgs) -> Result<()> {
     .await;
 
     heartbeat.abort();
+    if let Some(clipboard) = &started.clipboard {
+        clipboard.stop();
+    }
     // Closed whether or not the bridge ended cleanly: a session nobody ends stays "running"
     // for good, and its memory credential with it.
     memory::session::close(args.api_url.as_deref(), session_id).await;
