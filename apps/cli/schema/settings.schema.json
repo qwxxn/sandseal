@@ -241,7 +241,7 @@
         "onStart": {
           "type": "boolean",
           "default": true,
-          "description": "Whether `sandseal start` first cleans up sandboxes left behind by a CLI that was killed, and containers from sessions that already ended. Default true. A sandbox someone is still using is never touched — a running CLI holds a lock on its instance record, and locked records are skipped. Turn this off only if you deliberately keep sandboxes running with no CLI attached; `sandseal gc` still works either way."
+          "description": "Whether `sandseal start` first cleans up sandboxes left behind by a CLI that was killed, and containers from sessions that already ended. Default true. A sandbox someone is still using is never touched \u2014 a running CLI holds a lock on its instance record, and locked records are skipped. Turn this off only if you deliberately keep sandboxes running with no CLI attached; `sandseal gc` still works either way."
         }
       },
       "description": "When the collector for abandoned sandboxes runs on its own."
@@ -257,6 +257,18 @@
         }
       },
       "description": "How the sandbox presents itself in the terminal it was started from."
+    },
+    "clipboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the sandbox can read the host clipboard, read-only. This is what makes pasting an image into the agent (Ctrl+V) work: the CLI serves the clipboard over a socket in the instance tmp dir, and an `xclip` stand-in inside the container forwards the agent's requests to it. Only the requested bytes cross into the sandbox; the display, Windows drive and clipboard history do not. Turn it off where the clipboard may hold secrets the sandbox must not see \u2014 a sandboxed agent could read it at any time, not only when you paste."
+        }
+      },
+      "description": "What the sandbox may do with the host clipboard."
     }
   }
 }

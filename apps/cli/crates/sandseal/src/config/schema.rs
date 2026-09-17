@@ -42,6 +42,9 @@ pub struct Settings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<TerminalSettings>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipboard: Option<ClipboardSettings>,
 }
 
 impl Settings {
@@ -66,6 +69,28 @@ impl Settings {
             .and_then(|terminal| terminal.title)
             .unwrap_or(true)
     }
+
+    /// Whether the sandbox can read the host clipboard, which is what pasting an image
+    /// into the agent needs.
+    ///
+    /// Opt-out: image paste works natively and its absence reads as a bug, not a policy. The
+    /// switch exists because a clipboard can hold a password, and a profile may want the
+    /// sandbox kept away from it.
+    pub fn clipboard_enabled(&self) -> bool {
+        self.clipboard
+            .as_ref()
+            .and_then(|clipboard| clipboard.enabled)
+            .unwrap_or(true)
+    }
+}
+
+/// What the sandbox may do with the host clipboard.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardSettings {
+    /// Serve the host clipboard to the sandbox, read-only. Defaults to true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
 }
 
 /// How the sandbox presents itself in the terminal it was started from.
@@ -228,5 +253,12 @@ mod tests {
         assert!(parse(serde_json::json!({"gc": {}})).gc_on_start());
         assert!(parse(serde_json::json!({"gc": {"onStart": true}})).gc_on_start());
         assert!(!parse(serde_json::json!({"gc": {"onStart": false}})).gc_on_start());
+    }
+
+    #[test]
+    fn the_clipboard_is_shared_unless_someone_turns_it_off() {
+        assert!(parse(serde_json::json!({})).clipboard_enabled());
+        assert!(parse(serde_json::json!({"clipboard": {}})).clipboard_enabled());
+        assert!(!parse(serde_json::json!({"clipboard": {"enabled": false}})).clipboard_enabled());
     }
 }

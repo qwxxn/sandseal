@@ -46,6 +46,9 @@ pub enum Command {
     Chat(ChatArgs),
     /// Memory bridge used inside the sandbox (MCP server and recall hook)
     Memory(MemoryArgs),
+    /// Clipboard bridge client used inside the sandbox (what the `xclip` stand-in runs)
+    #[command(hide = true, disable_help_flag = true)]
+    Clipboard(ClipboardArgs),
     /// Update Sandseal to the latest release
     Update(UpdateArgs),
 }
@@ -86,6 +89,13 @@ pub struct MemoryRecallArgs {
 
     #[arg(long, env = "SANDSEAL_API_URL")]
     pub api_url: Option<String>,
+}
+
+#[derive(Parser)]
+pub struct ClipboardArgs {
+    /// xclip-style arguments, e.g. `-selection clipboard -t image/png -o`
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+    pub args: Vec<String>,
 }
 
 #[derive(Parser)]

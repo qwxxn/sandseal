@@ -1,0 +1,5 @@
+#!/bin/sh
+# xclip stand-in for the sandbox. There is no X server in here; Claude Code calls xclip to
+# read a pasted image, and this forwards that call to the Sandseal clipboard bridge, which
+# reads the clipboard on the host. Read-only: `xclip -i` (copying) is not bridged.
+exec sandseal clipboard "$@"

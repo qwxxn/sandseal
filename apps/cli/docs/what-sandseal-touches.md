@@ -24,13 +24,21 @@ changes you review with `git diff`.
 | `settings.json` | you | Machine-wide defaults: dependencies, file exclusions, workspace, network, hooks, environment. Read on every start. Sandseal never writes to it. |
 | `profiles/<name>.json` | `sandseal config` | Named settings presets you can switch between per project. |
 | `state.json` | `sandseal config use` | Which profile is active machine-wide. Machine-local. |
-| `tmp/<random>/` | `sandseal start` | Per-instance scratch: the generated compose override, rendered memory config, prestart scripts, and placeholder directories used to mask excluded paths. One directory per sandbox run. |
+| `tmp/<random>/` | `sandseal start` | Per-instance scratch: the generated compose override, rendered memory config, prestart scripts, the clipboard bridge socket (`clipboard.sock`, owner-only), and placeholder directories used to mask excluded paths. One directory per sandbox run. |
 | `instances/<instance>.json` | `sandseal start` | One record per running sandbox — which containers, tmp dir and session belong to it. The CLI holds an exclusive `flock` on it while the sandbox runs, so a record whose lock is free identifies a sandbox whose CLI is gone. Deleted on a clean exit, collected by `sandseal gc` otherwise. |
 | `keys/identity.key`, `keys/identity.pub` | `sandseal pair` / `connect` | Keypair identifying this machine to the dashboard for end-to-end encrypted remote sessions. Created on first use of a remote feature, not at install time. |
 
 Only `settings.json` is created up front. The rest appear when you first use the feature that
 needs them, so a fresh install that only ever runs `sandseal start` leaves a directory with a
 single file in it.
+
+### Programs the CLI runs on the host
+
+Apart from `docker`, the CLI runs one more thing on your behalf: whatever reads the clipboard
+on your platform, when the sandbox asks for it (see the clipboard bridge under *Mounts inside
+the container*). That is `powershell.exe` on WSL, `xclip` or `wl-paste` on Linux, and
+`osascript` / `pbpaste` on macOS — the same tools Claude Code uses natively for an image
+paste. Nothing is installed; a missing tool means the sandbox sees an empty clipboard.
 
 ### `~/.config/sandseal/auth.json`
 
@@ -131,7 +139,9 @@ sandbox applies to that instance only; put it in `dependencies` to make it perma
 | `workspace.dir` | rw/ro | An additional directory tree, for working across sibling repositories. |
 | `~/.sandseal/settings.json` | **ro** | Machine defaults, readable but not writable. |
 | `/opt/sandseal/skills` | ro | Bundled skills, copied into the agent home at startup. |
-| `/usr/local/bin/sandseal` | ro | The Sandseal binary itself, mounted so the in-container memory bridge can run. Only when memory is on. |
+| `/usr/local/bin/sandseal` | ro | The Sandseal binary itself, mounted so the in-container memory and clipboard bridges can run. Only when memory or the clipboard bridge is on. |
+| `/run/sandseal/clipboard.sock` | rw | The clipboard bridge: a socket the CLI serves the host clipboard on, so pasting an image into the agent works. Read-only by protocol — the sandbox can ask what the clipboard holds and fetch it, never set it. Only the requested bytes cross in; the display and, on WSL, the Windows drive stay outside. Off with `{"clipboard": {"enabled": false}}`. |
+| `/usr/local/bin/xclip` | ro | An `xclip` stand-in that forwards the agent's clipboard requests to the bridge. Only with the bridge. |
 | `/var/run/docker.sock` | rw | **Only if `docker.passthrough` is enabled.** Full Docker access — that is host-level privilege, so turn it on deliberately. |
 | `/tmp/prestart-scripts` | ro | Your prestart hook scripts. |
 | `/run/sandseal/mcp.json` | ro | Memory MCP server registration. Only when memory is on. |
