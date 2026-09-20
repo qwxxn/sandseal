@@ -8,6 +8,9 @@ FROM ${BASE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# See Dockerfile.base: this is what the collector recognises an untagged image of ours by.
+LABEL sandseal.image="overlay"
+
 USER root
 
 # Latest package versions are pulled fresh whenever CACHEBUST changes.

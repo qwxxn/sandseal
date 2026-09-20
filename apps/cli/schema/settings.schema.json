@@ -242,9 +242,15 @@
           "type": "boolean",
           "default": true,
           "description": "Whether `sandseal start` first cleans up sandboxes left behind by a CLI that was killed, and containers from sessions that already ended. Default true. A sandbox someone is still using is never touched \u2014 a running CLI holds a lock on its instance record, and locked records are skipped. Turn this off only if you deliberately keep sandboxes running with no CLI attached; `sandseal gc` still works either way."
+        },
+        "keepDays": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 14,
+          "description": "How many days an unused sandbox image or volume is kept before the sweep reclaims its disk. Default 14. Sandbox images are content-addressed, so every changed dependency or rebuilt base leaves the previous image behind holding gigabytes no later start will ask for. An image the CLI has resolved within this window is kept however old its layers are, an image or volume a container still references is never removed, and 0 turns reclaiming off entirely."
         }
       },
-      "description": "When the collector for abandoned sandboxes runs on its own."
+      "description": "When the collector for abandoned sandboxes runs, and how long unused images and volumes are kept."
     },
     "terminal": {
       "type": "object",

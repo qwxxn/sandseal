@@ -97,13 +97,15 @@ That is expected, and it is the only thing Sandseal writes outside its own direc
 | Base image | `sandseal-sandbox/agent-<agent>:base-<hash>` | Project-agnostic and **shared** by every project with the same base image, user and agent installs — rebuilding it updates all of them at once. |
 | Overlay image | `sandseal-sandbox/agent-<agent>:<project>-<hash>` | Built **only** if the project declares `dependencies` or a setup hook. Otherwise the sandbox runs the base image directly. |
 | Container | `sandseal-sandbox-<project>-<hash>-<instance>-agent-1` | One per running sandbox. |
-| Volume | `…_sandseal-agent-home` | Agent home. Persists CLI logins, installed user-level tools, `~/.cargo`, `~/.local`. Survives container restarts. |
-| Volume | `…_sandseal-apt-cache` | Shared apt cache, so repeated installs are fast. |
+| Volume | `sandseal-sandbox-agent-home` | Agent home, shared by every sandbox on the machine. Persists CLI logins, installed user-level tools, `~/.cargo`, `~/.local`. Survives container restarts, and is never collected. |
+| Volume | `sandseal-sandbox-apt-cache` | Shared apt cache, so repeated installs are fast. Never collected either. |
+| Marker | `~/.sandseal/image-use/<image id>` | When the CLI last resolved an image. An empty file whose mtime is the record; the collector reads it to tell a current image from an abandoned one. |
 | Labels | `sandseal.project_name`, `sandseal.project_dir`, `sandseal.instance_name` | How `sandseal status`, `sandseal destroy` and `sandseal gc` find instances. |
+| Labels | `sandseal.image` (`base` / `overlay`) | On the images themselves. What still identifies one of ours after a rebuild has taken its tag away. |
 
 `sandseal destroy` removes a project's sandboxes; `sandseal destroy --all` removes every one on
-the machine. Volumes persist by design — that is what makes an agent's login and installed
-tooling survive a restart.
+the machine. The two shared volumes persist by design — that is what makes an agent's login and
+installed tooling survive a restart.
 
 **Containers do not outlive the CLI.** A sandbox is torn down when you exit it, and also when
 the CLI is signalled — closing the terminal sends SIGHUP, which stops the container instead of
@@ -123,6 +125,26 @@ The sweep on `sandseal start` is opt-out. `{"gc": {"onStart": false}}` in settin
 `sandseal gc`, which is worth setting only if you deliberately keep sandboxes running with no
 CLI attached — detaching one properly (tmux, `nohup`) keeps its process, and therefore its
 lock, alive, so it survives the sweep either way.
+
+**The same sweep reclaims disk.** Sandbox images are content-addressed, so a changed dependency
+or a rebuilt base does not replace the previous image — it leaves it behind, tagged, holding a
+few gigabytes that no later start will ever ask for. Unchecked, that is hundreds of gigabytes
+over a few months, and the per-instance volumes an older layout created are worse: each one is
+a whole agent home.
+
+So the sweep also removes sandbox images and volumes nothing has wanted for `gc.keepDays`
+(default 14, `0` turns it off):
+
+- An image or volume a container still references is never a candidate, and nothing is ever
+  removed by force — docker itself refuses the rest.
+- The two shared volumes are excluded by name. Between sessions they are unreferenced like
+  everything else, and removing one would drop every login and installed tool on the machine.
+- **Age is last use, not build date.** The CLI records every image it resolves, built or
+  reused, so a base image whose inputs have not changed in months stays current; one whose
+  inputs did change is never resolved again and ages out. An image that does age out costs a
+  rebuild on the next start, nothing more.
+- Only volumes named `sandseal-sandbox-*` and images under `sandseal-sandbox/` are in scope.
+  Whatever else you run on the same docker daemon is not.
 
 **System packages do not survive an image rebuild.** Anything you `apt install` inside a running
 sandbox applies to that instance only; put it in `dependencies` to make it permanent.
@@ -223,7 +245,7 @@ from the host environment.
 sandseal destroy --all                           # every sandbox on this machine
 docker volume ls -q --filter name=sandseal-sandbox | xargs -r docker volume rm
 docker images 'sandseal-sandbox/*' -q | xargs -r docker rmi
-rm -rf ~/.sandseal ~/.config/sandseal            # settings, profiles, keys, token
+rm -rf ~/.sandseal ~/.config/sandseal            # settings, profiles, keys, image-use markers, token
 ```
 
 Then remove the `.sandseal/` directory from any project you used it in. The uninstall script

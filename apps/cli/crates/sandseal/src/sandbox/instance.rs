@@ -278,7 +278,7 @@ async fn collect_dead_sandboxes(settings: &Settings) {
         return;
     }
 
-    let report = gc::sweep(false).await;
+    let report = gc::sweep(settings.gc_keep_days(), false).await;
     if !report.is_empty() {
         println!("  {}", report.summary());
     }
@@ -825,10 +825,27 @@ mod tests {
 
 /// Explicit run of the collector `start` runs quietly.
 pub async fn collect_garbage(args: crate::cli::GcArgs) -> Result<()> {
-    let report = gc::sweep(args.dry_run).await;
+    // Machine-wide settings, plus the project's own when run inside one: `keepDays` is about
+    // this machine's disk, and a collector run from anywhere should honour what it says.
+    let keep_days = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| load::resolve(&cwd, &ProfileChoice::Active).ok())
+        .map(|resolved| resolved.settings.gc_keep_days())
+        .unwrap_or(crate::docker::prune::DEFAULT_KEEP_DAYS);
+
+    let report = gc::sweep(keep_days, args.dry_run).await;
 
     for instance in &report.reaped {
         println!("  {} {instance}", if args.dry_run { "would reap" } else { "reaped" });
+    }
+    for image in &report.pruned.images {
+        println!("  {} {image}", if args.dry_run { "would remove image" } else { "removed image" });
+    }
+    for volume in &report.pruned.volumes {
+        println!(
+            "  {} {volume}",
+            if args.dry_run { "would remove volume" } else { "removed volume" }
+        );
     }
 
     if report.is_empty() {

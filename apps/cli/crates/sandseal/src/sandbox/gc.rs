@@ -9,12 +9,16 @@
 //! So the containers are swept as well as reported. What makes that safe is the instance
 //! registry: a sandbox someone is still using holds a lock, and this never touches one that
 //! does.
+//!
+//! The same sweep reclaims the disk, which is the leftover nobody notices until it is
+//! measured in hundreds of gigabytes: see `docker::prune`.
 
 use std::path::Path;
 use std::process::Command;
 
 use tracing::debug;
 
+use crate::docker::prune::{self, PruneReport};
 use crate::sandbox::registry::{self, Orphan};
 
 #[derive(Default)]
@@ -23,11 +27,13 @@ pub struct SweepReport {
     pub reaped: Vec<String>,
     /// Containers left over from earlier sessions that had already stopped.
     pub removed_stale: usize,
+    /// Images and volumes nothing has wanted for long enough to reclaim.
+    pub pruned: PruneReport,
 }
 
 impl SweepReport {
     pub fn is_empty(&self) -> bool {
-        self.reaped.is_empty() && self.removed_stale == 0
+        self.reaped.is_empty() && self.removed_stale == 0 && self.pruned.is_empty()
     }
 
     /// The one line `sandseal start` prints, when there is anything to say.
@@ -39,12 +45,30 @@ impl SweepReport {
         if self.removed_stale > 0 {
             parts.push(format!("{} stopped container(s)", self.removed_stale));
         }
-        format!("Cleaned up {}.", parts.join(" and "))
+        if !self.pruned.images.is_empty() {
+            parts.push(format!("{} unused image(s)", self.pruned.images.len()));
+        }
+        if !self.pruned.volumes.is_empty() {
+            parts.push(format!("{} unused volume(s)", self.pruned.volumes.len()));
+        }
+        format!("Cleaned up {}.", join_with_and(&parts))
+    }
+}
+
+/// Puts a list into a sentence: "a", "a and b", "a, b and c".
+fn join_with_and(parts: &[String]) -> String {
+    match parts.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
     }
 }
 
 /// Reaps everything nobody is driving. `dry_run` reports without touching anything.
-pub async fn sweep(dry_run: bool) -> SweepReport {
+///
+/// `keep_days` is how long an unused image or volume is kept before its disk is reclaimed;
+/// 0 leaves them alone entirely.
+pub async fn sweep(keep_days: u64, dry_run: bool) -> SweepReport {
     let mut report = SweepReport::default();
 
     for orphan in registry::orphans() {
@@ -56,6 +80,9 @@ pub async fn sweep(dry_run: bool) -> SweepReport {
     }
 
     report.removed_stale = if dry_run { count_stale() } else { remove_stale() };
+    // After the containers, never before: an image or volume still attached to one of them is
+    // skipped, and reaping first is what makes the ones we just freed collectable.
+    report.pruned = prune::sweep(keep_days, dry_run);
     report
 }
 
@@ -89,7 +116,7 @@ fn take_down(instance_name: &str) {
         "--filter",
         &format!("label=sandseal.instance_name={instance_name}"),
     ]) {
-        let _ = Command::new("docker").args(["rm", "-f", &id]).output();
+        let _ = Command::new("docker").args(["rm", "-f", "-v", &id]).output();
     }
 }
 
@@ -131,7 +158,10 @@ fn remove_stale() -> usize {
     let ids = stale_container_ids();
     let mut removed = 0;
     for id in &ids {
-        if Command::new("docker").args(["rm", id]).output().is_ok_and(|o| o.status.success()) {
+        // `-v` takes any anonymous volume the container declared with it. Named volumes —
+        // the agent home, the apt cache — are not anonymous and are left alone.
+        if Command::new("docker").args(["rm", "-v", id]).output().is_ok_and(|o| o.status.success())
+        {
             removed += 1;
         }
     }
@@ -169,13 +199,40 @@ mod tests {
         let report = SweepReport {
             reaped: vec!["sandseal-sandbox-demo-ab12".into()],
             removed_stale: 4,
+            ..Default::default()
         };
         assert_eq!(report.summary(), "Cleaned up 1 abandoned sandbox(es) and 4 stopped container(s).");
     }
 
     #[test]
     fn the_summary_leaves_out_what_did_not_happen() {
-        let report = SweepReport { reaped: Vec::new(), removed_stale: 2 };
+        let report = SweepReport { removed_stale: 2, ..Default::default() };
         assert_eq!(report.summary(), "Cleaned up 2 stopped container(s).");
+    }
+
+    #[test]
+    fn the_summary_counts_the_disk_it_reclaimed() {
+        let report = SweepReport {
+            removed_stale: 1,
+            pruned: PruneReport {
+                images: vec!["sandseal-sandbox/agent-claude:base-old".into()],
+                volumes: vec!["a".into(), "b".into()],
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            report.summary(),
+            "Cleaned up 1 stopped container(s), 1 unused image(s) and 2 unused volume(s).",
+        );
+    }
+
+    #[test]
+    fn a_sweep_that_reclaimed_only_disk_is_still_worth_reporting() {
+        let report = SweepReport {
+            pruned: PruneReport { images: Vec::new(), volumes: vec!["v".into()] },
+            ..Default::default()
+        };
+        assert!(!report.is_empty());
+        assert_eq!(report.summary(), "Cleaned up 1 unused volume(s).");
     }
 }

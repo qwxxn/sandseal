@@ -36,6 +36,10 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 # (base image, user, agent installs, machine-wide dependencies and setup hook). Only what
 # a project adds on top of those lives in Dockerfile.overlay, built FROM this image.
 
+# What lets the collector recognise one of our images after a rebuild has taken its tag
+# away: an untagged image is otherwise unattributable and has to be left alone.
+LABEL sandseal.image="base"
+
 # Latest package versions / agent releases are pulled fresh whenever CACHEBUST changes.
 ARG CACHEBUST=1
 

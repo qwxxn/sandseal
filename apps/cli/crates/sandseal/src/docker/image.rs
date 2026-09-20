@@ -82,6 +82,7 @@ fn ensure_base(spec: &ImageSpec) -> Result<String> {
 
     if image_exists(&tag) && !spec.rebuild {
         debug!("base image up to date: {tag}");
+        record_use(&tag);
         return Ok(tag);
     }
 
@@ -102,6 +103,7 @@ fn ensure_base(spec: &ImageSpec) -> Result<String> {
         args.push(("CACHEBUST", cachebust()));
     }
     docker_build(&tag, &agents_dir.join("Dockerfile.base"), ctx.path(), &args)?;
+    record_use(&tag);
     Ok(tag)
 }
 
@@ -122,6 +124,7 @@ fn ensure_overlay(spec: &ImageSpec, base_tag: &str) -> Result<String> {
 
     if image_exists(&tag) && !spec.rebuild {
         debug!("overlay image up to date: {tag}");
+        record_use(&tag);
         return Ok(tag);
     }
 
@@ -142,7 +145,18 @@ fn ensure_overlay(spec: &ImageSpec, base_tag: &str) -> Result<String> {
         ctx.path(),
         &args,
     )?;
+    record_use(&tag);
     Ok(tag)
+}
+
+/// Tell the collector this image is still wanted, so it is not reclaimed as unused.
+///
+/// Every resolved tag is recorded, built or reused: a base image whose inputs have not
+/// changed in months is current, not stale, and its layer dates cannot say so.
+fn record_use(tag: &str) {
+    if let Some(id) = image_id(tag) {
+        crate::docker::prune::record_image_use(&id);
+    }
 }
 
 /// Remove a project's overlay images, leaving the shared base image intact.

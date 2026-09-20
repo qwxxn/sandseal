@@ -59,6 +59,19 @@ impl Settings {
             .unwrap_or(true)
     }
 
+    /// How long the sweep keeps an image or volume nothing is using.
+    ///
+    /// Sandbox images are content-addressed, so changing a dependency or rebuilding the base
+    /// leaves the previous one behind holding gigabytes that no later start will ever ask
+    /// for. They are a cache, and this is how long the cache is kept: an image the CLI has
+    /// resolved since then is current however old its layers are, and 0 turns reclaiming off.
+    pub fn gc_keep_days(&self) -> u64 {
+        self.gc
+            .as_ref()
+            .and_then(|gc| gc.keep_days)
+            .unwrap_or(crate::docker::prune::DEFAULT_KEEP_DAYS)
+    }
+
     /// Whether the CLI names the host terminal window after the sandbox.
     ///
     /// Opt-out: unnamed windows are indistinguishable once more than one sandbox is open,
@@ -114,6 +127,11 @@ pub struct GcSettings {
     /// Sweep before starting a sandbox. Defaults to true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_start: Option<bool>,
+
+    /// Days an unused image or volume is kept before its disk is reclaimed. 0 keeps them
+    /// forever.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_days: Option<u64>,
 }
 
 /// Memory configuration for this sandbox.
@@ -253,6 +271,15 @@ mod tests {
         assert!(parse(serde_json::json!({"gc": {}})).gc_on_start());
         assert!(parse(serde_json::json!({"gc": {"onStart": true}})).gc_on_start());
         assert!(!parse(serde_json::json!({"gc": {"onStart": false}})).gc_on_start());
+    }
+
+    #[test]
+    fn unused_images_are_kept_for_a_fortnight_unless_told_otherwise() {
+        assert_eq!(parse(serde_json::json!({})).gc_keep_days(), 14);
+        assert_eq!(parse(serde_json::json!({"gc": {"onStart": false}})).gc_keep_days(), 14);
+        assert_eq!(parse(serde_json::json!({"gc": {"keepDays": 30}})).gc_keep_days(), 30);
+        // 0 is a real answer — keep everything — not a missing one.
+        assert_eq!(parse(serde_json::json!({"gc": {"keepDays": 0}})).gc_keep_days(), 0);
     }
 
     #[test]
