@@ -2,6 +2,9 @@ services:
   agent:
     # image is set by the generated override; built ahead of time by the CLI
     pull_policy: never # the agent image is built locally
+    # The entrypoint execs the agent CLI, so without an init it becomes PID 1 and never reaps
+    # the children its hooks and MCP servers orphan. Zombies then pile up on the host.
+    init: true
     stdin_open: true
     tty: true
     volumes:
