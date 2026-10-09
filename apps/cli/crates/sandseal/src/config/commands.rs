@@ -185,6 +185,14 @@ fn effective(project_dir: &Path, args: ConfigEffectiveArgs) -> Result<()> {
         None => println!("  Profile: none"),
     }
     println!("  Project: {}", project_dir.display());
+    if resolved.sources.is_empty() {
+        println!("  Layers:  none");
+    } else {
+        println!("  Layers:  (lowest precedence first)");
+        for source in &resolved.sources {
+            println!("    {source}");
+        }
+    }
     println!();
     println!("{}", serde_json::to_string_pretty(&resolved.value)?);
 

@@ -40,10 +40,17 @@ fn sanitize_basename(project_dir: &Path) -> String {
         .replace(|c: char| !c.is_alphanumeric() && c != '-', "-")
 }
 
-/// Load the effective settings (global → profile → project) and announce the profile,
-/// so a profile inherited from state never applies invisibly.
+/// Load the effective settings (global → parent directories → project → profile) and
+/// announce what was inherited, so neither a parent directory's settings nor a profile from
+/// state ever applies invisibly.
 fn load_settings(project_dir: &Path, choice: &ProfileChoice) -> Result<load::Resolved> {
     let resolved = load::resolve(project_dir, choice)?;
+
+    for source in &resolved.sources {
+        if let load::LayerSource::Inherited(path) = source {
+            println!("  Settings: {}", path.display());
+        }
+    }
 
     match &resolved.profile {
         Some((name, source)) => println!("  Profile: {name} (from {source})"),
@@ -715,6 +722,7 @@ mod tests {
             shared: serde_json::from_value(shared).unwrap(),
             value: Value::Null,
             profile: None,
+            sources: Vec::new(),
         }
     }
 

@@ -97,7 +97,7 @@ Full schema: [`apps/cli/schema/settings.schema.json`](apps/cli/schema/settings.s
 ## Profiles
 
 A profile is a named settings file in `~/.sandseal/profiles/<name>.json`, using the same
-schema as `settings.json`. It slots between the global and project layers, so you can
+schema as `settings.json`. It lands on top of the global and project layers, so you can
 switch a whole set of restrictions on and off per project instead of editing one config.
 
 ```bash
@@ -125,11 +125,20 @@ sandseal config effective                   # merged settings actually used
 Layers are deep-merged, lowest precedence first:
 
 ```
-~/.sandseal/settings.json  ->  <project>/.sandseal/settings.json  ->  profile
+~/.sandseal/settings.json  ->  <parent>/.sandseal/settings.json ...  ->  <project>/.sandseal/settings.json  ->  profile
 ```
 
-Global carries the machine-wide defaults, the project adds its own specifics, and the
-profile lands on top — so a project cannot re-open what a profile closed.
+Global carries the machine-wide defaults, every `.sandseal/settings.json` in the
+directories above the project adds what a group of repositories shares (farthest first),
+the project adds its own specifics, and the profile lands on top — so a project cannot
+re-open what a profile closed.
+
+The parent-directory lookup lets you configure a whole folder of repos once — say
+`~/development/apps/.sandseal/settings.json` — instead of activating a profile in each.
+It stops below `$HOME`, since `~/.sandseal/settings.json` is already the global layer, and
+at the first file that sets `"root": true`, like `.editorconfig`. Relative paths in an
+inherited file resolve against the project. `sandseal config effective` lists every file
+that took part, and `sandseal start` prints each inherited one.
 
 | Value type | Merge behaviour |
 |---|---|

@@ -20,10 +20,11 @@ directory, so writes land on the host and persist.
   effect when the sandbox is started again, which only the user can do from the host.
 - **Change the machine-wide config.** `~/.sandseal/settings.json` *is* mounted here, but
   read-only, so you can read it to explain your own environment. Profiles
-  (`~/.sandseal/profiles/`) and the active-profile state are **not** visible at all. When the
-  behaviour you see is not explained by the project file plus the global one, an active
-  profile is the likely reason — say so and ask the user to run `sandseal config effective`
-  rather than guessing.
+  (`~/.sandseal/profiles/`), the active-profile state and settings inherited from directories
+  above the project are **not** visible at all. When the behaviour you see is not explained by
+  the project file plus the global one, one of those is the likely reason — say so and ask the
+  user to run `sandseal config effective` (it lists every file that took part) rather than
+  guessing.
 - **Read excluded files.** A file that is empty or missing may be excluded on purpose (see
   below). Do not "fix" that by removing the exclusion.
 
@@ -32,15 +33,23 @@ command to run.** Never claim a change is active.
 
 ## Where configuration comes from
 
-Three layers, deep-merged bottom-up:
+Layers, deep-merged bottom-up:
 
 ```
 ~/.sandseal/settings.json          machine-wide default   (mounted here read-only)
         ↓
+<parent>/.sandseal/settings.json   every directory between $HOME and the project,
+        ↓                          farthest first          (invisible to you)
 <project>/.sandseal/settings.json  this project           (you can edit this)
         ↓
 ~/.sandseal/profiles/<name>.json   active profile, if any (wins; invisible to you)
 ```
+
+Parent directories are how a group of repositories shares config: settings written once in
+`~/development/apps/.sandseal/settings.json` reach every repo under it. The lookup stops below
+`$HOME` (the global file is never read twice) and at a file that sets `"root": true` — put
+that in the project's own file to ignore everything above it. Relative paths in an inherited
+file resolve against the project, not against the directory the file lives in.
 
 Merge rules: objects merge recursively, **arrays concatenate and de-duplicate**, scalars from
 the higher layer win. So a profile's `files.exclude` is *added* to the project's, while

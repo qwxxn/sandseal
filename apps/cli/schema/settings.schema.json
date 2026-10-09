@@ -13,6 +13,10 @@
       "type": "string",
       "description": "Human-readable label for this settings file, shown by `sandseal config list`"
     },
+    "root": {
+      "type": "boolean",
+      "description": "Stop looking for .sandseal/settings.json in parent directories above this one (like root = true in .editorconfig). Without it, every settings file between the project and $HOME is merged in. Global settings and profiles still apply."
+    },
     "$replace": {
       "type": "array",
       "items": {
