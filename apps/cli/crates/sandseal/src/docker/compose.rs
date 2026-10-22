@@ -31,6 +31,8 @@ pub struct ComposeContext<'a> {
     pub image: &'a str,
     pub sandbox_home: &'a str,
     pub debug: bool,
+    /// No TTY and no stdin: the agent is driven by a program, not a person at a terminal.
+    pub headless: bool,
     pub agent_args: &'a [String],
     pub settings: &'a Settings,
     pub tmp_dir: &'a Path,
@@ -270,6 +272,13 @@ fn format_compose_yaml(
     // Image (prebuilt by the image module — compose only runs it)
     yaml.push_str(&format!("    image: {}\n", ctx.image));
 
+    // The base template is interactive (tty + stdin_open); headless turns both off. With a
+    // TTY docker merges the agent's streams and adds terminal noise, and a TTY container
+    // cannot be attached without a terminal on our side at all.
+    if ctx.headless {
+        yaml.push_str("    tty: false\n    stdin_open: false\n");
+    }
+
     // Network mode
     if host_network {
         yaml.push_str("    network_mode: host\n");
@@ -357,6 +366,7 @@ mod tests {
             image: "sandseal-sandbox/agent-claude:test",
             sandbox_home: "/home/agent",
             debug: false,
+            headless: false,
             agent_args: &[],
             settings,
             tmp_dir: project_dir,
@@ -364,6 +374,42 @@ mod tests {
             memory: None,
             clipboard_socket: None,
         }
+    }
+
+    #[test]
+    fn headless_turns_off_the_tty_and_stdin_of_the_base_template() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let mut ctx = context(script_dir.path(), project.path(), &settings);
+        ctx.headless = true;
+        let yaml = generate_compose_override(&ctx).unwrap();
+
+        // Explicit false, not absent: the override merges onto a base that sets both.
+        assert!(yaml.contains("    tty: false\n"), "{yaml}");
+        assert!(yaml.contains("    stdin_open: false\n"), "{yaml}");
+    }
+
+    #[test]
+    fn interactive_keeps_the_tty_and_stdin_of_the_base_template() {
+        let script_dir = script_dir_with_agent();
+        let project = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let yaml = generate_compose_override(&context(script_dir.path(), project.path(), &settings)).unwrap();
+
+        assert!(!yaml.contains("tty:"), "{yaml}");
+        assert!(!yaml.contains("stdin_open:"), "{yaml}");
+    }
+
+    #[test]
+    fn the_base_template_is_interactive() {
+        // What headless overrides — if the base stops setting these, the override is moot.
+        let base = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../agents/docker-compose.yml"),
+        )
+        .unwrap();
+        assert!(base.contains("tty: true"), "{base}");
+        assert!(base.contains("stdin_open: true"), "{base}");
     }
 
     #[test]

@@ -27,7 +27,10 @@ async fn main() -> Result<()> {
             if args.remote {
                 start_remote(args).await?;
             } else {
-                instance::start(args).await?;
+                let code = instance::start(args).await?;
+                if code != 0 {
+                    std::process::exit(code);
+                }
             }
         }
         Command::Build(args) => instance::build(args)?,

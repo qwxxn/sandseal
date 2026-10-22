@@ -54,12 +54,15 @@ fn ensure_shared_volumes() -> Result<()> {
 }
 
 /// Run `docker compose up -d agent` (images are prebuilt by the image module).
-pub fn compose_up(cmd: &[String], env: &ComposeEnv) -> Result<()> {
+///
+/// `create_only` stops at creating the container (`--no-start`), for a caller that starts
+/// it attached itself so that none of the agent's output is missed.
+pub fn compose_up(cmd: &[String], env: &ComposeEnv, create_only: bool) -> Result<()> {
     ensure_shared_volumes()?;
 
     let mut args: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
     args.push("up");
-    args.push("-d");
+    args.push(if create_only { "--no-start" } else { "-d" });
     args.push("agent");
 
     debug!("running: {}", args.join(" "));
@@ -246,14 +249,18 @@ where
     let _ = out.flush().await;
 }
 
-/// Get the container name for a compose project.
-pub fn get_container_name(instance_name: &str) -> Result<String> {
+/// Get the container name for a compose project. `include_stopped` also finds a container
+/// that was only created, or has already exited.
+pub fn get_container_name(instance_name: &str, include_stopped: bool) -> Result<String> {
+    let filter = format!("label=com.docker.compose.project={instance_name}");
+    let mut args = vec!["ps"];
+    if include_stopped {
+        args.push("--all");
+    }
+    args.extend(["--filter", &filter, "--format", "{{.Names}}"]);
+
     let output = Command::new("docker")
-        .args([
-            "ps",
-            "--filter", &format!("label=com.docker.compose.project={instance_name}"),
-            "--format", "{{.Names}}",
-        ])
+        .args(&args)
         .output()
         .context("failed to query container name")?;
 

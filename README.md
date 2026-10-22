@@ -191,6 +191,7 @@ sandseal start -d [path]     Start in debug mode (bash shell)
 sandseal start --rebuild     Force rebuild the Docker image
 sandseal start --profile x   Use profile x instead of the active one
 sandseal start --no-profile  Ignore the active profile for this run
+sandseal start --headless -- -p "…"   No TTY/stdin: agent output on stdout, its exit code as ours
 sandseal destroy [path]      Destroy sandbox for a project
 sandseal destroy --all       Destroy all sandboxes
 sandseal status              Show running sandboxes

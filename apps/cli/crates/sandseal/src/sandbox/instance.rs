@@ -7,7 +7,7 @@ use tracing::{debug, info};
 use crate::cli::{BuildArgs, DestroyArgs, StartArgs};
 use crate::config::load::{self, ProfileChoice};
 use crate::config::Settings;
-use crate::docker::{build, compose, image, runtime};
+use crate::docker::{build, compose, headless, image, runtime};
 use crate::sandbox::cleanup::{register_signal_handler, CleanupGuard};
 use crate::sandbox::registry::{self, InstanceRecord};
 use crate::sandbox::{gc, heartbeat, hooks};
@@ -243,7 +243,16 @@ pub struct StartedSandbox {
     pub clipboard: Option<crate::clipboard::server::Bridge>,
 }
 
-pub async fn start(args: StartArgs) -> Result<()> {
+/// Run a local sandbox to the end. Returns the exit code the CLI should exit with: the
+/// agent's in headless mode, always 0 interactively.
+pub async fn start(args: StartArgs) -> Result<i32> {
+    // Before anything is printed, so that nothing but the agent ever reaches stdout.
+    let agent_stdout = if args.headless {
+        Some(headless::reserve_stdout()?)
+    } else {
+        None
+    };
+
     let started = prepare_and_launch(&args).await?;
 
     // Beats until the sandbox ends. Without it the backend cannot tell a session that is
@@ -253,9 +262,28 @@ pub async fn start(args: StartArgs) -> Result<()> {
         .clone()
         .map(|id| heartbeat::spawn(args.api_url.clone(), id));
 
-    // Local mode: attach interactively
-    runtime::wait_and_attach(&started.container_name, &started.title_prefix).await?;
+    let code = match agent_stdout {
+        // Torn down on failure too: there is nobody at a terminal to notice a sandbox
+        // left running.
+        Some(agent_stdout) => match headless::run(&started.container_name, agent_stdout).await {
+            Ok(code) => code,
+            Err(err) => {
+                finish(&started, heartbeat);
+                return Err(err);
+            }
+        },
+        // Local mode: attach interactively
+        None => {
+            runtime::wait_and_attach(&started.container_name, &started.title_prefix).await?;
+            0
+        }
+    };
 
+    finish(&started, heartbeat);
+    Ok(code)
+}
+
+fn finish(started: &StartedSandbox, heartbeat: Option<tokio::task::JoinHandle<()>>) {
     if let Some(task) = heartbeat {
         task.abort();
     }
@@ -267,12 +295,8 @@ pub async fn start(args: StartArgs) -> Result<()> {
 
     // Tears the sandbox down and closes the session, which revokes the memory credential
     // straight away — a token left in a stopped container is worth nothing.
-    {
-        let mut guard = started.guard.lock().unwrap();
-        guard.cleanup();
-    }
-
-    Ok(())
+    let mut guard = started.guard.lock().unwrap();
+    guard.cleanup();
 }
 
 /// The sweep `start` runs on the way in — a sandbox left over from a killed CLI is still
@@ -439,6 +463,7 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
         image: &image,
         sandbox_home: &sandbox_home,
         debug: std::env::var("SANDSEAL_DEBUG").is_ok(),
+        headless: args.headless,
         agent_args: &args.agent_args,
         settings: &settings,
         tmp_dir: &tmp_path,
@@ -497,9 +522,10 @@ async fn prepare_and_launch(args: &StartArgs) -> Result<StartedSandbox> {
     let compose_env = runtime::ComposeEnv {
         project_dir: project_dir.to_string_lossy().to_string(),
     };
-    runtime::compose_up(&compose_cmd, &compose_env)?;
+    // Headless only creates the container: `headless::run` starts it attached.
+    runtime::compose_up(&compose_cmd, &compose_env, args.headless)?;
 
-    let container_name = runtime::get_container_name(&instance_name)?;
+    let container_name = runtime::get_container_name(&instance_name, args.headless)?;
 
     Ok(StartedSandbox {
         container_name,

@@ -130,6 +130,11 @@ pub struct StartArgs {
     #[arg(long, env = "SANDSEAL_API_URL")]
     pub api_url: Option<String>,
 
+    /// Run without a terminal: no TTY or stdin in the sandbox, only the agent's output on
+    /// stdout (the CLI's own goes to stderr) and its exit code as ours
+    #[arg(long, conflicts_with = "remote")]
+    pub headless: bool,
+
     /// Arguments passed through to the agent CLI (after --)
     #[arg(last = true)]
     pub agent_args: Vec<String>,
